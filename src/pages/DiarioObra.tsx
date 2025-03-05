@@ -67,9 +67,9 @@ const ETAPAS_FLUXOGRAMA = [
   'Fundação',
   'Alvenaria',
   'Estrutura',
+  'Passagens Elétricas',
   'Passagens Hidráulicas',
   'Laje',
-  'Passagens Elétricas',
   'Cobertura',
   'Instalações Elétricas',
   'Instalações Hidráulicas',
@@ -223,6 +223,7 @@ const DiarioObra = () => {
       
       // Formata a data mantendo o dia correto, usando UTC para evitar problemas de fuso horário
       const dataObj = new Date(data);
+      // Garantir que a data seja formatada corretamente no formato ISO
       const dataFormatada = format(new Date(Date.UTC(dataObj.getFullYear(), dataObj.getMonth(), dataObj.getDate(), 12, 0, 0)), 'yyyy-MM-dd');
       console.log('[DEBUG] Data original:', data);
       console.log('[DEBUG] Data formatada:', dataFormatada);
@@ -693,7 +694,7 @@ const DiarioObra = () => {
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
                     <p className="font-medium">
-                      {format(new Date(registro.data), "dd 'de' MMMM 'de' yyyy", {
+                      {format(parseISO(registro.data), "dd 'de' MMMM 'de' yyyy", {
                         locale: ptBR,
                       })}
                     </p>
@@ -864,7 +865,7 @@ const DiarioObra = () => {
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              Registro do dia {registroSelecionado && format(new Date(registroSelecionado.data), "dd 'de' MMMM 'de' yyyy", {
+              Registro do dia {registroSelecionado && format(parseISO(registroSelecionado.data), "dd 'de' MMMM 'de' yyyy", {
                 locale: ptBR,
               })}
             </DialogTitle>

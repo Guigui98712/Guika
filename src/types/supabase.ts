@@ -19,11 +19,42 @@ export interface Database {
           progresso: number
           status: 'pendente' | 'em_andamento' | 'concluido'
           logo_url: string | null
+          cliente: string | null
+          responsavel: string | null
+          data_inicio: string | null
+          data_previsao_fim: string | null
           created_at: string
           updated_at: string
         }
         Insert: Omit<Database['public']['Tables']['obras']['Row'], 'id' | 'created_at' | 'updated_at'>
         Update: Partial<Database['public']['Tables']['obras']['Insert']>
+      }
+      funcionarios: {
+        Row: {
+          id: number
+          nome: string
+          cargo: string | null
+          telefone: string | null
+          email: string | null
+          ativo: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: Omit<Database['public']['Tables']['funcionarios']['Row'], 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Database['public']['Tables']['funcionarios']['Insert']>
+      }
+      presencas: {
+        Row: {
+          id: number
+          obra_id: number
+          funcionario_id: number
+          data: string
+          presente: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: Omit<Database['public']['Tables']['presencas']['Row'], 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Database['public']['Tables']['presencas']['Insert']>
       }
       diario_obra: {
         Row: {

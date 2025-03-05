@@ -6,12 +6,28 @@ import path from "path";
 export default defineConfig({
   server: {
     port: 8083,
-    host: "0.0.0.0",
+    host: true,
+    strictPort: true,
+    watch: {
+      usePolling: true
+    }
   },
   plugins: [react()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+  },
+  optimizeDeps: {
+    exclude: ['batch', 'emitter']
+  },
+  build: {
+    rollupOptions: {
+      external: ['batch', 'emitter']
+    }
+  },
+  define: {
+    'process.env': {},
+    global: {},
   },
 });

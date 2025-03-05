@@ -38,6 +38,9 @@ interface PresencasPorSemana {
 }
 
 const Relatorios = () => {
+  // Verificar se a função gerarRelatorioSemanal está sendo importada corretamente
+  console.log('[DEBUG] Tipo da função gerarRelatorioSemanal:', typeof gerarRelatorioSemanal);
+  
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -65,7 +68,6 @@ const Relatorios = () => {
     
     // Adicionar dias de segunda (índice 1) a sexta (índice 5)
     for (let i = 1; i <= 5; i++) {
-      // Adicionamos um dia a mais para compensar o problema de fuso horário
       const dia = addDays(inicioSemana, i);
       dias.push(dia);
     }
@@ -157,8 +159,12 @@ const Relatorios = () => {
     }
   };
 
-  const handleGerarRelatorio = async () => {
-    if (!id) return;
+  const gerarRelatorio = async () => {
+    console.log('[DEBUG] Botão de gerar relatório clicado!');
+    if (!id) {
+      console.error('[DEBUG] ID da obra não fornecido');
+      return;
+    }
 
     try {
       console.log('[DEBUG] Iniciando geração de relatório...');
@@ -169,28 +175,38 @@ const Relatorios = () => {
       console.log('[DEBUG] Período selecionado:', { dataInicio, dataFim });
 
       // Verificar se já existe relatório para esta semana
-      const { data: relatorioExistente } = await supabase
-        .from('relatorios')
-        .select('*')
-        .eq('obra_id', id)
-        .eq('data_inicio', dataInicio)
-        .eq('data_fim', dataFim)
-        .single();
+      try {
+        const { data: relatorioExistente, error } = await supabase
+          .from('relatorios')
+          .select('*')
+          .eq('obra_id', id)
+          .eq('data_inicio', dataInicio)
+          .eq('data_fim', dataFim)
+          .single();
 
-      if (relatorioExistente) {
-        console.log('[DEBUG] Relatório já existe para esta semana:', relatorioExistente);
-        toast({
-          title: "Aviso",
-          description: "Já existe um relatório para esta semana.",
-          variant: "destructive"
-        });
-        return;
+        if (error && error.code !== 'PGRST116') {
+          console.error('[DEBUG] Erro ao verificar relatório existente:', error);
+          throw error;
+        }
+
+        if (relatorioExistente) {
+          console.log('[DEBUG] Relatório já existe para esta semana:', relatorioExistente);
+          toast({
+            title: "Aviso",
+            description: "Já existe um relatório para esta semana.",
+            variant: "destructive"
+          });
+          return;
+        }
+      } catch (checkError) {
+        console.error('[DEBUG] Erro ao verificar relatório existente:', checkError);
+        // Continuar mesmo se houver erro na verificação
       }
 
       // Incluir dados de presença no relatório
       const presencasFormatadas = funcionarios.map(func => ({
         nome: func.nome,
-        presencas: getDiasUteis(startOfWeek(semanaAtual, { weekStartsOn: 0 }))
+        presencas: getDiasUteis(semanaAtual)
           .map(dia => ({
             data: format(dia, 'yyyy-MM-dd'),
             presente: func.presencas[format(dia, 'yyyy-MM-dd')] || 0
@@ -199,58 +215,72 @@ const Relatorios = () => {
       console.log('[DEBUG] Presenças formatadas:', JSON.stringify(presencasFormatadas, null, 2));
 
       console.log('[DEBUG] Chamando gerarRelatorioSemanal...');
-      const html = await gerarRelatorioSemanal(Number(id), dataInicio, dataFim, presencasFormatadas);
-      console.log('[DEBUG] HTML recebido, tamanho:', html?.length || 0);
-      
-      // Salvar o relatório no Supabase
-      console.log('[DEBUG] Salvando relatório no Supabase...');
-      const { data: novoRelatorio, error } = await supabase
-        .from('relatorios')
-        .insert([
-          {
-            obra_id: Number(id),
-            data_inicio: dataInicio,
-            data_fim: dataFim,
-            tipo: 'semanal',
-            conteudo: html
+      try {
+        const html = await gerarRelatorioSemanal(Number(id), dataInicio, dataFim, presencasFormatadas);
+        console.log('[DEBUG] HTML recebido, tamanho:', html?.length || 0);
+        
+        if (!html) {
+          console.error('[DEBUG] HTML retornado é nulo ou vazio');
+          throw new Error('O relatório gerado está vazio');
+        }
+        
+        // Salvar o relatório no Supabase
+        console.log('[DEBUG] Salvando relatório no Supabase...');
+        try {
+          const { data: novoRelatorio, error } = await supabase
+            .from('relatorios')
+            .insert([
+              {
+                obra_id: Number(id),
+                data_inicio: dataInicio,
+                data_fim: dataFim,
+                tipo: 'semanal',
+                conteudo: html
+              }
+            ])
+            .select()
+            .single();
+
+          if (error) {
+            console.error('[DEBUG] Erro ao salvar relatório:', error);
+            // Não vamos lançar o erro, apenas logar
+            toast({
+              title: "Aviso",
+              description: "O relatório foi gerado, mas não foi possível salvá-lo no banco de dados.",
+              variant: "destructive"
+            });
+          } else {
+            console.log('[DEBUG] Relatório salvo com sucesso:', novoRelatorio);
+            // Atualizar a lista de relatórios apenas se salvou com sucesso
+            await carregarRelatoriosAnteriores();
           }
-        ])
-        .select()
-        .single();
+        } catch (saveError) {
+          console.error('[DEBUG] Erro ao salvar relatório:', saveError);
+        }
+        
+        // Criar um Blob com o HTML e abrir em nova aba - independente de salvar ou não
+        console.log('[DEBUG] Criando Blob e abrindo em nova aba...');
+        const blob = new Blob([html], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const novaJanela = window.open(url, '_blank');
+        
+        if (!novaJanela) {
+          console.error('[DEBUG] Falha ao abrir nova janela. Possível bloqueio de pop-up.');
+          toast({
+            title: "Atenção",
+            description: "O relatório foi gerado, mas não foi possível abri-lo automaticamente. Verifique se o bloqueador de pop-ups está ativado.",
+            variant: "destructive"
+          });
+        }
 
-      if (error) {
-        console.error('[DEBUG] Erro ao salvar relatório:', error);
-        // Não vamos lançar o erro, apenas logar
         toast({
-          title: "Aviso",
-          description: "O relatório foi gerado, mas não foi possível salvá-lo no banco de dados.",
-          variant: "destructive"
+          title: "Sucesso",
+          description: "Relatório gerado com sucesso!",
         });
-      } else {
-        console.log('[DEBUG] Relatório salvo com sucesso:', novoRelatorio);
-        // Atualizar a lista de relatórios apenas se salvou com sucesso
-        await carregarRelatoriosAnteriores();
+      } catch (apiError) {
+        console.error('[DEBUG] Erro ao chamar gerarRelatorioSemanal:', apiError);
+        throw apiError;
       }
-      
-      // Criar um Blob com o HTML e abrir em nova aba - independente de salvar ou não
-      console.log('[DEBUG] Criando Blob e abrindo em nova aba...');
-      const blob = new Blob([html], { type: 'text/html' });
-      const url = URL.createObjectURL(blob);
-      const novaJanela = window.open(url, '_blank');
-      
-      if (!novaJanela) {
-        console.error('[DEBUG] Falha ao abrir nova janela. Possível bloqueio de pop-up.');
-        toast({
-          title: "Atenção",
-          description: "O relatório foi gerado, mas não foi possível abri-lo automaticamente. Verifique se o bloqueador de pop-ups está ativado.",
-          variant: "destructive"
-        });
-      }
-
-      toast({
-        title: "Sucesso",
-        description: "Relatório gerado com sucesso!",
-      });
     } catch (error) {
       console.error('[DEBUG] Erro ao gerar relatório:', error);
       // Verificar se é um erro do Supabase
@@ -259,7 +289,7 @@ const Relatorios = () => {
       }
       toast({
         title: "Erro",
-        description: "Não foi possível gerar o relatório.",
+        description: "Não foi possível gerar o relatório. Verifique o console para mais detalhes.",
         variant: "destructive"
       });
     } finally {
@@ -493,6 +523,29 @@ const Relatorios = () => {
   // Obter os dias úteis da semana atual
   const diasUteis = getDiasUteis(startOfWeek(semanaAtual, { weekStartsOn: 0 }));
 
+  // Função de teste para verificar se o problema está na função gerarRelatorioSemanal
+  const testarGeracaoRelatorio = async () => {
+    console.log('[DEBUG] Função de teste chamada!');
+    if (!id) {
+      console.error('[DEBUG] ID da obra não fornecido');
+      return;
+    }
+    
+    try {
+      const dataInicio = format(startOfWeek(semanaAtual, { weekStartsOn: 0 }), 'yyyy-MM-dd');
+      const dataFim = format(endOfWeek(semanaAtual, { weekStartsOn: 0 }), 'yyyy-MM-dd');
+      console.log('[DEBUG] Chamando gerarRelatorioSemanal diretamente...');
+      
+      const html = await gerarRelatorioSemanal(Number(id), dataInicio, dataFim, []);
+      console.log('[DEBUG] HTML recebido, tamanho:', html?.length || 0);
+      
+      alert('Função gerarRelatorioSemanal executada com sucesso!');
+    } catch (error) {
+      console.error('[DEBUG] Erro ao chamar gerarRelatorioSemanal diretamente:', error);
+      alert('Erro ao chamar gerarRelatorioSemanal: ' + (error instanceof Error ? error.message : String(error)));
+    }
+  };
+
   return (
     <div className="space-y-8">
       <div className="flex items-center gap-4 mb-6">
@@ -632,11 +685,39 @@ const Relatorios = () => {
 
           <Button 
             className="w-full mt-6"
-            onClick={handleGerarRelatorio}
-            disabled={gerando}
+            onClick={gerarRelatorio}
+            onMouseDown={() => console.log('[DEBUG] Evento onMouseDown acionado!')}
+            disabled={false}
           >
             <FileText className="w-4 h-4 mr-2" />
-            {gerando ? 'Gerando...' : 'Gerar Relatório'}
+            Gerar Relatório
+          </Button>
+          
+          <Button 
+            className="w-full mt-2"
+            onClick={testarGeracaoRelatorio}
+            variant="outline"
+          >
+            Testar Geração de Relatório
+          </Button>
+
+          <Button 
+            className="w-full mt-2"
+            onClick={() => {
+              console.log('[DEBUG] Botão inline clicado!');
+              if (!id) {
+                console.error('[DEBUG] ID da obra não fornecido');
+                return;
+              }
+              
+              const dataInicio = format(startOfWeek(semanaAtual, { weekStartsOn: 0 }), 'yyyy-MM-dd');
+              const dataFim = format(endOfWeek(semanaAtual, { weekStartsOn: 0 }), 'yyyy-MM-dd');
+              
+              alert(`Botão inline clicado! ID: ${id}, Período: ${dataInicio} a ${dataFim}`);
+            }}
+            variant="outline"
+          >
+            Função Inline
           </Button>
         </div>
       </Card>
@@ -652,10 +733,10 @@ const Relatorios = () => {
               >
                 <div>
                   <p className="font-medium">
-                    {format(new Date(relatorio.data_inicio), "dd/MM/yyyy")} - {format(new Date(relatorio.data_fim), "dd/MM/yyyy")}
+                    {format(parseISO(relatorio.data_inicio), "dd/MM/yyyy")} - {format(parseISO(relatorio.data_fim), "dd/MM/yyyy")}
                   </p>
                   <p className="text-sm text-gray-500">
-                    Gerado em: {format(new Date(relatorio.created_at), "dd/MM/yyyy HH:mm")}
+                    Gerado em: {format(parseISO(relatorio.created_at), "dd/MM/yyyy HH:mm")}
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -704,10 +785,10 @@ const Relatorios = () => {
               >
                 <div>
                   <p className="font-medium">
-                    {format(new Date(relatorio.data_inicio), "dd/MM/yyyy")} - {format(new Date(relatorio.data_fim), "dd/MM/yyyy")}
+                    {format(parseISO(relatorio.data_inicio), "dd/MM/yyyy")} - {format(parseISO(relatorio.data_fim), "dd/MM/yyyy")}
                   </p>
                   <p className="text-sm text-gray-500">
-                    Gerado em: {format(new Date(relatorio.created_at), "dd/MM/yyyy HH:mm")}
+                    Gerado em: {format(parseISO(relatorio.created_at), "dd/MM/yyyy HH:mm")}
                   </p>
                 </div>
                 <div className="flex gap-2">

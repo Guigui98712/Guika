@@ -1,4 +1,3 @@
-
 export interface ChecklistItem {
   id: number;
   item: string;
@@ -37,6 +36,11 @@ export interface Obra {
   created_at: string;
   updated_at: string;
   etapas?: Etapa[];
+  logo_url?: string | null;
+  cliente?: string | null;
+  responsavel?: string | null;
+  data_previsao_fim?: string | null;
+  data_inicio?: string | null;
 }
 
 export interface RegistroDiario {

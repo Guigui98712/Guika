@@ -71,10 +71,10 @@ const ObraDetalhes = () => {
       // Processa os registros para determinar o status atual de cada etapa
       const etapasStatus: { [key: string]: 'pendente' | 'em_andamento' | 'concluida' } = {};
       const todasEtapas = [
-        'Terraplenagem', 'Fundação', 'Infraestrutura', 'Alvenaria', 'Estrutura',
-        'Instalações Elétricas', 'Instalações Hidráulicas', 'Passagens', 'Cobertura',
-        'Revestimento Interno', 'Revestimento Externo', 'Reboco Interno', 'Reboco Externo',
-        'Pisos', 'Gesso', 'Marmoraria', 'Pintura', 'Esquadrias', 'Limpeza Bruta',
+        'Serviços Preliminares', 'Terraplenagem', 'Fundação', 'Alvenaria', 'Estrutura',
+        'Passagens Elétricas', 'Passagens Hidráulicas', 'Laje', 'Cobertura',
+        'Instalações Elétricas', 'Instalações Hidráulicas', 'Reboco', 'Regularização',
+        'Revestimento', 'Gesso', 'Marmoraria', 'Pintura', 'Esquadrias', 'Limpeza Bruta',
         'Marcenaria', 'Metais', 'Limpeza Final'
       ];
 
@@ -142,7 +142,7 @@ const ObraDetalhes = () => {
       setRegistrosDiario(registros);
       
       // Atualizar datas com registro
-      const datas = registros.map(reg => new Date(reg.data));
+      const datas = registros.map(reg => parseISO(reg.data));
       setDatasComRegistro(datas);
 
       // Calcular progresso baseado nos registros do diário
@@ -191,10 +191,10 @@ const ObraDetalhes = () => {
 
           // Garantir que todas as etapas do fluxograma tenham um status
           const todasEtapas = [
-            'Terraplenagem', 'Fundação', 'Infraestrutura', 'Alvenaria', 'Estrutura',
-            'Instalações Elétricas', 'Instalações Hidráulicas', 'Passagens', 'Cobertura',
-            'Revestimento Interno', 'Revestimento Externo', 'Reboco Interno', 'Reboco Externo',
-            'Pisos', 'Gesso', 'Marmoraria', 'Pintura', 'Esquadrias', 'Limpeza Bruta',
+            'Serviços Preliminares', 'Terraplenagem', 'Fundação', 'Alvenaria', 'Estrutura',
+            'Passagens Elétricas', 'Passagens Hidráulicas', 'Laje', 'Cobertura',
+            'Instalações Elétricas', 'Instalações Hidráulicas', 'Reboco', 'Regularização',
+            'Revestimento', 'Gesso', 'Marmoraria', 'Pintura', 'Esquadrias', 'Limpeza Bruta',
             'Marcenaria', 'Metais', 'Limpeza Final'
           ];
 
