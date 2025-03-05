@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
+import html2pdf from "html2pdf.js";
 
 // Interface para o funcionário
 interface Funcionario {
@@ -160,47 +161,32 @@ const Relatorios = () => {
   };
 
   const gerarRelatorio = async () => {
-    console.log('[DEBUG] Botão de gerar relatório clicado!');
     if (!id) {
       console.error('[DEBUG] ID da obra não fornecido');
       return;
     }
 
     try {
-      console.log('[DEBUG] Iniciando geração de relatório...');
       setGerando(true);
-      // Ajustando para usar weekStartsOn: 0 para garantir que o domingo seja o início da semana
       const dataInicio = format(startOfWeek(semanaAtual, { weekStartsOn: 0 }), 'yyyy-MM-dd');
       const dataFim = format(endOfWeek(semanaAtual, { weekStartsOn: 0 }), 'yyyy-MM-dd');
-      console.log('[DEBUG] Período selecionado:', { dataInicio, dataFim });
 
       // Verificar se já existe relatório para esta semana
-      try {
-        const { data: relatorioExistente, error } = await supabase
-          .from('relatorios')
-          .select('*')
-          .eq('obra_id', id)
-          .eq('data_inicio', dataInicio)
-          .eq('data_fim', dataFim)
-          .single();
+      const { data: relatorioExistente } = await supabase
+        .from('relatorios')
+        .select('*')
+        .eq('obra_id', id)
+        .eq('data_inicio', dataInicio)
+        .eq('data_fim', dataFim)
+        .single();
 
-        if (error && error.code !== 'PGRST116') {
-          console.error('[DEBUG] Erro ao verificar relatório existente:', error);
-          throw error;
-        }
-
-        if (relatorioExistente) {
-          console.log('[DEBUG] Relatório já existe para esta semana:', relatorioExistente);
-          toast({
-            title: "Aviso",
-            description: "Já existe um relatório para esta semana.",
-            variant: "destructive"
-          });
-          return;
-        }
-      } catch (checkError) {
-        console.error('[DEBUG] Erro ao verificar relatório existente:', checkError);
-        // Continuar mesmo se houver erro na verificação
+      if (relatorioExistente) {
+        toast({
+          title: "Aviso",
+          description: "Já existe um relatório para esta semana.",
+          variant: "destructive"
+        });
+        return;
       }
 
       // Incluir dados de presença no relatório
@@ -212,84 +198,48 @@ const Relatorios = () => {
             presente: func.presencas[format(dia, 'yyyy-MM-dd')] || 0
           }))
       }));
-      console.log('[DEBUG] Presenças formatadas:', JSON.stringify(presencasFormatadas, null, 2));
 
-      console.log('[DEBUG] Chamando gerarRelatorioSemanal...');
-      try {
-        const html = await gerarRelatorioSemanal(Number(id), dataInicio, dataFim, presencasFormatadas);
-        console.log('[DEBUG] HTML recebido, tamanho:', html?.length || 0);
-        
-        if (!html) {
-          console.error('[DEBUG] HTML retornado é nulo ou vazio');
-          throw new Error('O relatório gerado está vazio');
-        }
-        
-        // Salvar o relatório no Supabase
-        console.log('[DEBUG] Salvando relatório no Supabase...');
-        try {
-          const { data: novoRelatorio, error } = await supabase
-            .from('relatorios')
-            .insert([
-              {
-                obra_id: Number(id),
-                data_inicio: dataInicio,
-                data_fim: dataFim,
-                tipo: 'semanal',
-                conteudo: html
-              }
-            ])
-            .select()
-            .single();
-
-          if (error) {
-            console.error('[DEBUG] Erro ao salvar relatório:', error);
-            // Não vamos lançar o erro, apenas logar
-            toast({
-              title: "Aviso",
-              description: "O relatório foi gerado, mas não foi possível salvá-lo no banco de dados.",
-              variant: "destructive"
-            });
-          } else {
-            console.log('[DEBUG] Relatório salvo com sucesso:', novoRelatorio);
-            // Atualizar a lista de relatórios apenas se salvou com sucesso
-            await carregarRelatoriosAnteriores();
-          }
-        } catch (saveError) {
-          console.error('[DEBUG] Erro ao salvar relatório:', saveError);
-        }
-        
-        // Criar um Blob com o HTML e abrir em nova aba - independente de salvar ou não
-        console.log('[DEBUG] Criando Blob e abrindo em nova aba...');
-        const blob = new Blob([html], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        const novaJanela = window.open(url, '_blank');
-        
-        if (!novaJanela) {
-          console.error('[DEBUG] Falha ao abrir nova janela. Possível bloqueio de pop-up.');
-          toast({
-            title: "Atenção",
-            description: "O relatório foi gerado, mas não foi possível abri-lo automaticamente. Verifique se o bloqueador de pop-ups está ativado.",
-            variant: "destructive"
-          });
-        }
-
-        toast({
-          title: "Sucesso",
-          description: "Relatório gerado com sucesso!",
-        });
-      } catch (apiError) {
-        console.error('[DEBUG] Erro ao chamar gerarRelatorioSemanal:', apiError);
-        throw apiError;
+      const html = await gerarRelatorioSemanal(Number(id), dataInicio, dataFim, presencasFormatadas);
+      
+      if (!html) {
+        throw new Error('O relatório gerado está vazio');
       }
+      
+      // Salvar o relatório no Supabase
+      const { data: novoRelatorio, error } = await supabase
+        .from('relatorios')
+        .insert([{
+          obra_id: Number(id),
+          data_inicio: dataInicio,
+          data_fim: dataFim,
+          tipo: 'semanal',
+          conteudo: html
+        }])
+        .select()
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      // Atualizar a lista de relatórios
+      await carregarRelatoriosAnteriores();
+      
+      // Abrir o relatório em uma nova aba
+      const blob = new Blob([html], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      URL.revokeObjectURL(url);
+
+      toast({
+        title: "Sucesso",
+        description: "Relatório gerado com sucesso!",
+      });
     } catch (error) {
-      console.error('[DEBUG] Erro ao gerar relatório:', error);
-      // Verificar se é um erro do Supabase
-      if (error && typeof error === 'object' && 'code' in error) {
-        console.error('[DEBUG] Erro do Supabase:', error.code, error.message);
-      }
+      console.error('Erro ao gerar relatório:', error);
       toast({
         title: "Erro",
-        description: "Não foi possível gerar o relatório. Verifique o console para mais detalhes.",
+        description: "Não foi possível gerar o relatório.",
         variant: "destructive"
       });
     } finally {
@@ -323,13 +273,14 @@ const Relatorios = () => {
     });
   };
 
-  const handleVisualizarRelatorio = async (relatorio: any) => {
+  const handleVisualizarRelatorio = (relatorio: any) => {
     try {
       const blob = new Blob([relatorio.conteudo], { type: 'text/html' });
       const url = URL.createObjectURL(blob);
       window.open(url, '_blank');
+      URL.revokeObjectURL(url);
     } catch (error) {
-      console.error('Erro ao visualizar relatório:', error);
+      console.error('Erro ao visualizar o relatório:', error);
       toast({
         title: "Erro",
         description: "Não foi possível visualizar o relatório.",
@@ -523,26 +474,46 @@ const Relatorios = () => {
   // Obter os dias úteis da semana atual
   const diasUteis = getDiasUteis(startOfWeek(semanaAtual, { weekStartsOn: 0 }));
 
-  // Função de teste para verificar se o problema está na função gerarRelatorioSemanal
-  const testarGeracaoRelatorio = async () => {
-    console.log('[DEBUG] Função de teste chamada!');
-    if (!id) {
-      console.error('[DEBUG] ID da obra não fornecido');
-      return;
-    }
-    
+  const handleDownloadPDF = async (relatorio: any) => {
     try {
-      const dataInicio = format(startOfWeek(semanaAtual, { weekStartsOn: 0 }), 'yyyy-MM-dd');
-      const dataFim = format(endOfWeek(semanaAtual, { weekStartsOn: 0 }), 'yyyy-MM-dd');
-      console.log('[DEBUG] Chamando gerarRelatorioSemanal diretamente...');
+      // Criar um elemento temporário para renderizar o HTML
+      const element = document.createElement('div');
+      element.innerHTML = relatorio.conteudo;
+      document.body.appendChild(element);
+
+      // Configurar as opções do PDF
+      const options = {
+        margin: [10, 10, 10, 10], // Margens menores
+        filename: `relatorio_${format(parseISO(relatorio.data_inicio), 'dd-MM-yyyy')}_a_${format(parseISO(relatorio.data_fim), 'dd-MM-yyyy')}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { 
+          scale: 1.5, // Escala reduzida
+          useCORS: true,
+          logging: false,
+          letterRendering: true
+        },
+        jsPDF: { 
+          unit: 'mm', 
+          format: 'a4', 
+          orientation: 'portrait',
+          compress: true,
+          hotfixes: ["px_scaling"]
+        },
+        pagebreak: { mode: 'avoid-all' } // Tenta evitar quebras de página desnecessárias
+      };
+
+      // Gerar o PDF usando html2pdf
+      await html2pdf().set(options).from(element).save();
       
-      const html = await gerarRelatorioSemanal(Number(id), dataInicio, dataFim, []);
-      console.log('[DEBUG] HTML recebido, tamanho:', html?.length || 0);
-      
-      alert('Função gerarRelatorioSemanal executada com sucesso!');
+      // Limpar o elemento temporário
+      document.body.removeChild(element);
     } catch (error) {
-      console.error('[DEBUG] Erro ao chamar gerarRelatorioSemanal diretamente:', error);
-      alert('Erro ao chamar gerarRelatorioSemanal: ' + (error instanceof Error ? error.message : String(error)));
+      console.error('Erro ao baixar o PDF:', error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível baixar o PDF do relatório.",
+        variant: "destructive"
+      });
     }
   };
 
@@ -686,38 +657,19 @@ const Relatorios = () => {
           <Button 
             className="w-full mt-6"
             onClick={gerarRelatorio}
-            onMouseDown={() => console.log('[DEBUG] Evento onMouseDown acionado!')}
-            disabled={false}
+            disabled={gerando}
           >
-            <FileText className="w-4 h-4 mr-2" />
-            Gerar Relatório
-          </Button>
-          
-          <Button 
-            className="w-full mt-2"
-            onClick={testarGeracaoRelatorio}
-            variant="outline"
-          >
-            Testar Geração de Relatório
-          </Button>
-
-          <Button 
-            className="w-full mt-2"
-            onClick={() => {
-              console.log('[DEBUG] Botão inline clicado!');
-              if (!id) {
-                console.error('[DEBUG] ID da obra não fornecido');
-                return;
-              }
-              
-              const dataInicio = format(startOfWeek(semanaAtual, { weekStartsOn: 0 }), 'yyyy-MM-dd');
-              const dataFim = format(endOfWeek(semanaAtual, { weekStartsOn: 0 }), 'yyyy-MM-dd');
-              
-              alert(`Botão inline clicado! ID: ${id}, Período: ${dataInicio} a ${dataFim}`);
-            }}
-            variant="outline"
-          >
-            Função Inline
+            {gerando ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                Gerando...
+              </>
+            ) : (
+              <>
+                <FileText className="w-4 h-4 mr-2" />
+                Gerar Relatório
+              </>
+            )}
           </Button>
         </div>
       </Card>
@@ -748,24 +700,21 @@ const Relatorios = () => {
                     <FileText className="w-4 h-4 mr-2" />
                     Visualizar
                   </Button>
-                  {relatorio.pdf_url && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => window.open(relatorio.pdf_url, '_blank')}
-                    >
-                      <Download className="w-4 h-4 mr-2" />
-                      Download PDF
-                    </Button>
-                  )}
                   <Button
                     variant="outline"
                     size="sm"
-                    className="text-red-600 hover:text-red-700"
-                    onClick={() => handleExcluirRelatorio(relatorio.id)}
+                    onClick={() => handleDownloadPDF(relatorio)}
                   >
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    Excluir
+                    <Download className="w-4 h-4 mr-2" />
+                    Baixar PDF
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleExcluirRelatorio(relatorio.id)}
+                    className="text-red-500 hover:text-red-700"
+                  >
+                    <Trash2 className="w-4 h-4" />
                   </Button>
                 </div>
               </div>
@@ -800,24 +749,21 @@ const Relatorios = () => {
                     <FileText className="w-4 h-4 mr-2" />
                     Visualizar
                   </Button>
-                  {relatorio.pdf_url && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => window.open(relatorio.pdf_url, '_blank')}
-                    >
-                      <Download className="w-4 h-4 mr-2" />
-                      Download PDF
-                    </Button>
-                  )}
                   <Button
                     variant="outline"
                     size="sm"
-                    className="text-red-600 hover:text-red-700"
-                    onClick={() => handleExcluirRelatorio(relatorio.id)}
+                    onClick={() => handleDownloadPDF(relatorio)}
                   >
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    Excluir
+                    <Download className="w-4 h-4 mr-2" />
+                    Baixar PDF
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleExcluirRelatorio(relatorio.id)}
+                    className="text-red-500 hover:text-red-700"
+                  >
+                    <Trash2 className="w-4 h-4" />
                   </Button>
                 </div>
               </div>
