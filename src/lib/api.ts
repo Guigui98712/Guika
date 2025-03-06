@@ -332,6 +332,8 @@ export const gerarRelatorioSemanal = async (obraId: number, dataInicio: string, 
             border: 1px solid #eee;
             border-radius: 4px;
             padding: 12px;
+            page-break-inside: avoid;
+            break-inside: avoid;
           }
           .info-card {
             display: grid;
@@ -420,8 +422,10 @@ export const gerarRelatorioSemanal = async (obraId: number, dataInicio: string, 
           }
           .presenca-table {
             margin-top: 10px;
-            page-break-inside: avoid;
-            break-inside: avoid;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            display: table;
+            width: 100%;
           }
           table {
             width: 100%;
@@ -430,14 +434,16 @@ export const gerarRelatorioSemanal = async (obraId: number, dataInicio: string, 
             border-radius: 4px;
             overflow: hidden;
             border: 1px solid #eee;
-            page-break-inside: avoid;
-            break-inside: avoid;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
           }
           th, td {
             border: 1px solid #eee;
             padding: 8px;
             text-align: left;
             font-size: 0.9em;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
           }
           .footer {
             margin-top: 30px;
