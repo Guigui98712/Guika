@@ -1,10 +1,15 @@
 import React from 'react';
-import { createRoot } from 'react-dom/client';
+import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App.tsx';
 import './index.css';
+import { initializeLiveUpdates } from './lib/live-updates';
 
 const queryClient = new QueryClient();
+
+// Inicializa o Live Updates
+initializeLiveUpdates();
+
 const rootElement = document.getElementById('root');
 
 if (!rootElement) {
@@ -12,7 +17,7 @@ if (!rootElement) {
 }
 
 try {
-  createRoot(rootElement).render(
+  ReactDOM.createRoot(rootElement).render(
     <React.StrictMode>
       <QueryClientProvider client={queryClient}>
         <App />

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
-import { ArrowLeft, Building2, Calendar as CalendarIcon, DollarSign, FileText, Plus, Pencil } from 'lucide-react';
+import { ArrowLeft, Building2, Calendar as CalendarIcon, DollarSign, FileText, Plus, Pencil, CalendarDays, AlertCircle } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, BarChart, Bar, XAxis, YAxis } from 'recharts';
 import Calendar from 'react-calendar';
@@ -15,6 +15,7 @@ import { ptBR } from 'date-fns/locale';
 import { buscarObra, listarRegistrosDiario, gerarRelatorioSemanal, atualizarObra } from '@/lib/api';
 import { useToast } from '@/components/ui/use-toast';
 import GraficoEtapas from '@/components/GraficoEtapas';
+import { obterPendencias } from '@/lib/trello';
 
 interface DiarioRegistro {
   id: number;
@@ -44,6 +45,8 @@ interface Obra {
   progresso: number;
   custo_previsto: number;
   custo_real: number;
+  responsavel?: string;
+  trello_board_id?: string;
 }
 
 interface EtapaComDatas {
@@ -65,11 +68,10 @@ const ObraDetalhes = () => {
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
   const [etapasStatus, setEtapasStatus] = useState<{[key: string]: 'pendente' | 'em_andamento' | 'concluida'}>({});
+  const [numeroPendencias, setNumeroPendencias] = useState(0);
 
-  const calcularProgresso = async (registros: DiarioRegistro[]) => {
+  const calcularProgresso = (registros: DiarioRegistro[]) => {
     try {
-      // Processa os registros para determinar o status atual de cada etapa
-      const etapasStatus: { [key: string]: 'pendente' | 'em_andamento' | 'concluida' } = {};
       const todasEtapas = [
         'Serviços Preliminares', 'Terraplenagem', 'Fundação', 'Alvenaria', 'Estrutura',
         'Passagens Elétricas', 'Passagens Hidráulicas', 'Laje', 'Cobertura',
@@ -78,13 +80,12 @@ const ObraDetalhes = () => {
         'Marcenaria', 'Metais', 'Limpeza Final'
       ];
 
-      // Inicializa todas as etapas como pendentes
+      const etapasStatus: { [key: string]: 'pendente' | 'em_andamento' | 'concluida' } = {};
       todasEtapas.forEach(etapa => {
         etapasStatus[etapa] = 'pendente';
       });
 
-      // Atualiza o status das etapas baseado nos registros
-      for (const registro of registros) {
+      registros.forEach(registro => {
         registro.etapas_iniciadas?.forEach(etapa => {
           if (etapasStatus[etapa] !== 'concluida') {
             etapasStatus[etapa] = 'em_andamento';
@@ -94,13 +95,10 @@ const ObraDetalhes = () => {
         registro.etapas_concluidas?.forEach(etapa => {
           etapasStatus[etapa] = 'concluida';
         });
-      }
+      });
 
-      // Calcula o progresso baseado nas etapas concluídas
       const etapasConcluidas = Object.values(etapasStatus).filter(status => status === 'concluida').length;
-      const progresso = Math.round((etapasConcluidas / todasEtapas.length) * 100);
-      
-      return progresso;
+      return Math.round((etapasConcluidas / todasEtapas.length) * 100);
     } catch (error) {
       console.error('Erro ao calcular progresso:', error);
       return 0;
@@ -124,37 +122,20 @@ const ObraDetalhes = () => {
     try {
       setLoading(true);
       setError(null);
-      console.log('Carregando dados da obra:', id);
 
       const obraData = await buscarObra(Number(id));
       if (!obraData) {
         throw new Error('Obra não encontrada');
       }
       
-      console.log('Dados da obra carregados:', obraData);
       setObra(obraData);
       setEtapas(obraData.etapas || []);
 
-      // Carregar registros do diário
-      console.log('Carregando registros do diário...');
       const registros = await listarRegistrosDiario(Number(id));
-      console.log('Registros carregados:', registros);
       setRegistrosDiario(registros);
       
-      // Atualizar datas com registro
       const datas = registros.map(reg => parseISO(reg.data));
       setDatasComRegistro(datas);
-
-      // Calcular progresso baseado nos registros do diário
-      const novoProgresso = await calcularProgresso(registros);
-      console.log('Novo progresso calculado:', novoProgresso);
-
-      // Se o progresso calculado for diferente do progresso armazenado, atualiza
-      if (novoProgresso !== obraData.progresso) {
-        console.log('Atualizando progresso:', { novoProgresso, progressoAtual: obraData.progresso });
-        const obraAtualizada = await atualizarObra(Number(id), { progresso: novoProgresso });
-        setObra(obraAtualizada);
-      }
 
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
@@ -221,6 +202,26 @@ const ObraDetalhes = () => {
     }
   }, [id]);
 
+  useEffect(() => {
+    if (obra?.trello_board_id) {
+      carregarPendencias();
+    }
+  }, [obra]);
+
+  const carregarPendencias = async () => {
+    try {
+      if (!obra?.trello_board_id) return;
+
+      const board = await obterPendencias(obra.trello_board_id);
+      const pendentes = board.lists.find(l => l.name === 'Pendente')?.cards.length || 0;
+      const emAndamento = board.lists.find(l => l.name === 'Em Andamento')?.cards.length || 0;
+      
+      setNumeroPendencias(pendentes + emAndamento);
+    } catch (error) {
+      console.error('Erro ao carregar pendências:', error);
+    }
+  };
+
   const CORES_STATUS = {
     concluido: "#4CAF50",
     em_andamento: "#FFC107",
@@ -244,6 +245,14 @@ const ObraDetalhes = () => {
       d.getMonth() === date.getMonth() && 
       d.getFullYear() === date.getFullYear()
     ) ? 'bg-blue-100' : '';
+  };
+
+  const handleVoltar = () => {
+    navigate('/obras');
+  };
+
+  const handleDiarioClick = () => {
+    navigate(`/obras/${id}/diario`);
   };
 
   if (loading) {
@@ -282,103 +291,64 @@ const ObraDetalhes = () => {
     );
   }
 
+  const progressoGeral = calcularProgresso(registrosDiario);
+
   return (
     <div className="space-y-8 p-6 max-w-7xl mx-auto">
-      {/* Cabeçalho */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => navigate('/obras')}
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <h1 className="text-3xl font-bold text-gray-800">{obra.nome}</h1>
+      <div className="grid grid-cols-1 gap-6 mt-6">
+        <div className="bg-white rounded-lg shadow-sm p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-2xl font-bold">{obra?.nome}</h2>
+              <p className="text-gray-600">{obra?.endereco}</p>
+            </div>
+            <div className="flex gap-4">
+              <Button variant="outline" onClick={handleVoltar}>
+                Voltar
+              </Button>
+              <Button onClick={handleDiarioClick}>
+                <CalendarDays className="w-4 h-4 mr-2" />
+                Diário de Obra
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div className="p-4 bg-gray-50 rounded-lg">
+              <h3 className="text-sm font-medium text-gray-500">Status</h3>
+              <p className="mt-1 text-lg font-semibold">{obra?.status || 'Em Andamento'}</p>
+            </div>
+            <div className="p-4 bg-gray-50 rounded-lg">
+              <h3 className="text-sm font-medium text-gray-500">Responsável</h3>
+              <p className="mt-1 text-lg font-semibold">{obra?.responsavel || 'Não informado'}</p>
+            </div>
+            <div className="p-4 bg-gray-50 rounded-lg">
+              <h3 className="text-sm font-medium text-gray-500">Progresso Geral</h3>
+              <div className="mt-1">
+                <Progress value={progressoGeral} className="h-2" />
+                <p className="mt-1 text-sm text-gray-600">{progressoGeral}% concluído</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div className="p-4 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => navigate(`/obras/${id}/pendencias`)}>
+              <h3 className="text-sm font-medium text-gray-500">Pendências</h3>
+              <div className="mt-1 flex items-center justify-between">
+                <p className="text-lg font-semibold">{numeroPendencias}</p>
+                <AlertCircle className="w-5 h-5 text-yellow-500" />
+              </div>
+            </div>
+          </div>
         </div>
-        <Button
-          onClick={() => navigate(`/obras/${id}/diario`)}
-          className="bg-primary hover:bg-primary-dark"
-        >
-          <CalendarIcon className="w-4 h-4 mr-2" />
-          Diário de Obra
-        </Button>
-      </div>
 
-      {/* Seção 1 - Informações Gerais */}
-      <Card className="p-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div>
-            <h3 className="font-medium text-gray-600">Endereço</h3>
-            <p className="text-lg">{obra.endereco}</p>
-          </div>
-          <div>
-            <h3 className="font-medium text-gray-600">Status</h3>
-            <p className="capitalize">{obra.status.replace('_', ' ')}</p>
-          </div>
-          <div>
-            <h3 className="font-medium text-gray-600">Progresso Geral</h3>
-            <Progress value={obra.progresso} className="mt-2" />
-            <p className="text-sm text-right mt-1">{obra.progresso}%</p>
+        <div className="bg-white rounded-lg shadow-sm p-6">
+          <h3 className="text-lg font-semibold mb-4">Fluxograma da Obra</h3>
+          <div className="relative">
+            <FluxogramaObra registros={registrosDiario} />
           </div>
         </div>
-      </Card>
-
-      {/* Seção 2 - Gráficos de Custo */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card className="p-6">
-          <h3 className="text-lg font-semibold mb-4">Custo por Etapa</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={dadosCustoPorEtapa}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={80}
-                >
-                  {dadosCustoPorEtapa.map((entry, index) => (
-                    <Cell key={index} fill={CORES_STATUS[entry.status]} />
-                  ))}
-                </Pie>
-                <Tooltip />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-
-        <Card className="p-6">
-          <h3 className="text-lg font-semibold mb-4">Custo Total</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={dadosCustoTotal}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={80}
-                >
-                  <Cell fill="#4CAF50" />
-                  <Cell fill="#F44336" />
-                </Pie>
-                <Tooltip />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
       </div>
-
-      {/* Seção 3 - Etapas e Fluxograma */}
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold mb-4">Fluxograma da Obra</h3>
-        <FluxogramaObra registros={registrosDiario} />
-      </Card>
 
       {/* Análise de Duração */}
       <Card className="p-6">

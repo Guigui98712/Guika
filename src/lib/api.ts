@@ -673,3 +673,27 @@ export const excluirOrcamento = async (id: number) => {
     throw error;
   }
 };
+
+export const atualizarTrelloBoardId = async (obraId: number, boardId: string) => {
+  try {
+    console.log('Atualizando ID do quadro do Trello:', { obraId, boardId });
+    
+    const { data, error } = await supabase
+      .from('obras')
+      .update({ trello_board_id: boardId })
+      .eq('id', obraId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Erro do Supabase:', error);
+      throw error;
+    }
+
+    console.log('Atualização bem-sucedida:', data);
+    return data;
+  } catch (error) {
+    console.error('Erro detalhado ao atualizar ID do quadro do Trello:', error);
+    throw error;
+  }
+};

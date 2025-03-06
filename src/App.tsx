@@ -11,6 +11,7 @@ import ComparativoOrcamento from "./pages/ComparativoOrcamento";
 import NotFound from "./pages/NotFound";
 import SelecionarObraDiario from "./pages/SelecionarObraDiario";
 import SelecionarObraRelatorio from "./pages/SelecionarObraRelatorio";
+import PendenciasObra from "./pages/PendenciasObra";
 import "./App.css";
 
 function App() {
@@ -21,6 +22,7 @@ function App() {
           <Route path="/" element={<Navigate to="/obras" replace />} />
           <Route path="/obras" element={<Obras />} />
           <Route path="/obras/:id" element={<ObraDetalhes />} />
+          <Route path="/obras/:id/pendencias" element={<PendenciasObra />} />
           <Route path="/diario" element={<SelecionarObraDiario />} />
           <Route path="/obras/:id/diario" element={<DiarioObra />} />
           <Route path="/relatorios" element={<SelecionarObraRelatorio />} />
