@@ -12,30 +12,33 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { buscarObra, atualizarTrelloBoardId } from '@/lib/api';
-import { criarQuadroObra, obterPendencias, criarPendencia, moverPendencia, excluirPendencia } from '@/lib/trello';
+import { buscarObra } from '@/lib/api';
+import { obterQuadroObra, criarCard, moverCard, excluirCard } from '@/lib/trello-local';
 
 interface Pendencia {
-  id: string;
-  nome: string;
-  descricao: string;
-  status: 'pendente' | 'em_andamento' | 'concluida';
-  data_criacao: string;
+  id: number;
+  title: string;
+  description: string | null;
+  list_id: number;
+}
+
+interface Lista {
+  id: number;
+  title: string;
+  cards: Pendencia[];
 }
 
 const PendenciasObra = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [pendencias, setPendencias] = useState<Pendencia[]>([]);
   const [loading, setLoading] = useState(true);
   const [showDialog, setShowDialog] = useState(false);
   const [novaPendencia, setNovaPendencia] = useState({
-    nome: '',
-    descricao: ''
+    title: '',
+    description: ''
   });
-  const [boardId, setBoardId] = useState<string | null>(null);
-  const [listas, setListas] = useState<{[key: string]: string}>({});
+  const [listas, setListas] = useState<Lista[]>([]);
 
   useEffect(() => {
     carregarDados();
@@ -60,31 +63,6 @@ const PendenciasObra = () => {
         return;
       }
 
-      // Se a obra não tiver um quadro no Trello, criar um
-      if (!obra.trello_board_id) {
-        console.log('Obra não tem quadro no Trello, criando...');
-        try {
-          const novoQuadroId = await criarQuadroObra(obra.nome);
-          console.log('Novo quadro criado:', novoQuadroId);
-          
-          await atualizarTrelloBoardId(Number(id), novoQuadroId);
-          console.log('ID do quadro atualizado na obra');
-          
-          setBoardId(novoQuadroId);
-        } catch (trelloError) {
-          console.error('Erro ao criar quadro no Trello:', trelloError);
-          toast({
-            title: "Erro",
-            description: "Não foi possível criar o quadro no Trello",
-            variant: "destructive"
-          });
-          return;
-        }
-      } else {
-        console.log('Obra já tem quadro no Trello:', obra.trello_board_id);
-        setBoardId(obra.trello_board_id);
-      }
-
       await carregarPendencias();
     } catch (error) {
       console.error('Erro detalhado ao carregar dados:', error);
@@ -99,46 +77,18 @@ const PendenciasObra = () => {
   };
 
   const carregarPendencias = async () => {
-    if (!boardId) {
-      console.log('Não há boardId, não é possível carregar pendências');
-      return;
-    }
-
     try {
-      console.log('Carregando pendências do quadro:', boardId);
-      const board = await obterPendencias(boardId);
-      console.log('Dados do quadro:', board);
+      console.log('Carregando pendências da obra:', id);
+      const quadro = await obterQuadroObra(Number(id));
+      console.log('Dados do quadro:', quadro);
       
-      // Mapear IDs das listas
-      const listasMap: {[key: string]: string} = {};
-      board.lists.forEach(lista => {
-        if (lista.name === 'Pendente') listasMap.pendente = lista.id;
-        if (lista.name === 'Em Andamento') listasMap.em_andamento = lista.id;
-        if (lista.name === 'Concluído') listasMap.concluido = lista.id;
-      });
-      console.log('IDs das listas mapeados:', listasMap);
-      setListas(listasMap);
+      if (!quadro.lists || quadro.lists.length === 0) {
+        console.log('Nenhuma lista encontrada, tentando criar listas padrão...');
+        await carregarDados();
+        return;
+      }
 
-      // Converter cards do Trello para o formato de pendências
-      const todasPendencias: Pendencia[] = [];
-      board.lists.forEach(lista => {
-        lista.cards.forEach(card => {
-          let status: 'pendente' | 'em_andamento' | 'concluida';
-          if (lista.name === 'Pendente') status = 'pendente';
-          else if (lista.name === 'Em Andamento') status = 'em_andamento';
-          else status = 'concluida';
-
-          todasPendencias.push({
-            id: card.id,
-            nome: card.name,
-            descricao: card.desc,
-            status,
-            data_criacao: card.due || new Date().toISOString()
-          });
-        });
-      });
-      console.log('Pendências carregadas:', todasPendencias);
-      setPendencias(todasPendencias);
+      setListas(quadro.lists);
     } catch (error) {
       console.error('Erro detalhado ao carregar pendências:', error);
       toast({
@@ -150,31 +100,44 @@ const PendenciasObra = () => {
   };
 
   const adicionarPendencia = async () => {
-    console.log('Tentando adicionar pendência...');
-    console.log('boardId:', boardId);
-    console.log('listas:', listas);
-    console.log('novaPendencia:', novaPendencia);
-
-    if (!boardId || !listas.pendente) {
-      console.log('Faltando boardId ou lista pendente');
-      return;
-    }
-
     try {
-      console.log('Chamando criarPendencia com:', {
-        listaId: listas.pendente,
-        nome: novaPendencia.nome,
-        descricao: novaPendencia.descricao
+      console.log('Tentando adicionar pendência...');
+      const listaAFazer = listas.find(l => l.title === 'A Fazer');
+      console.log('Lista "A Fazer":', listaAFazer);
+      
+      if (!listaAFazer) {
+        console.error('Lista "A Fazer" não encontrada');
+        toast({
+          title: "Erro",
+          description: 'Lista "A Fazer" não encontrada',
+          variant: "destructive"
+        });
+        return;
+      }
+
+      if (!novaPendencia.title.trim()) {
+        toast({
+          title: "Erro",
+          description: "O título da pendência é obrigatório",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      console.log('Criando card com:', {
+        listId: listaAFazer.id,
+        title: novaPendencia.title,
+        description: novaPendencia.description
       });
 
-      await criarPendencia(
-        listas.pendente,
-        novaPendencia.nome,
-        novaPendencia.descricao
+      await criarCard(
+        listaAFazer.id,
+        novaPendencia.title,
+        novaPendencia.description
       );
 
       setShowDialog(false);
-      setNovaPendencia({ nome: '', descricao: '' });
+      setNovaPendencia({ title: '', description: '' });
       toast({
         title: "Sucesso",
         description: "Pendência adicionada com sucesso!"
@@ -185,18 +148,15 @@ const PendenciasObra = () => {
       console.error('Erro ao adicionar pendência:', error);
       toast({
         title: "Erro",
-        description: "Não foi possível adicionar a pendência.",
+        description: error instanceof Error ? error.message : "Não foi possível adicionar a pendência.",
         variant: "destructive"
       });
     }
   };
 
-  const handleMoverPendencia = async (pendenciaId: string, novoStatus: 'pendente' | 'em_andamento' | 'concluida') => {
-    const listaDestino = listas[novoStatus === 'concluida' ? 'concluido' : novoStatus];
-    if (!listaDestino) return;
-
+  const handleMoverPendencia = async (cardId: number, novaListaId: number) => {
     try {
-      await moverPendencia(pendenciaId, listaDestino);
+      await moverCard(cardId, novaListaId);
       await carregarPendencias();
       
       toast({
@@ -213,9 +173,9 @@ const PendenciasObra = () => {
     }
   };
 
-  const handleExcluirPendencia = async (pendenciaId: string) => {
+  const handleExcluirPendencia = async (cardId: number) => {
     try {
-      await excluirPendencia(pendenciaId);
+      await excluirCard(cardId);
       await carregarPendencias();
       
       toast({
@@ -270,16 +230,16 @@ const PendenciasObra = () => {
               <div>
                 <label className="text-sm font-medium">Título</label>
                 <Input
-                  value={novaPendencia.nome}
-                  onChange={(e) => setNovaPendencia({ ...novaPendencia, nome: e.target.value })}
+                  value={novaPendencia.title}
+                  onChange={(e) => setNovaPendencia({ ...novaPendencia, title: e.target.value })}
                   placeholder="Digite o título da pendência"
                 />
               </div>
               <div>
                 <label className="text-sm font-medium">Descrição</label>
                 <Input
-                  value={novaPendencia.descricao}
-                  onChange={(e) => setNovaPendencia({ ...novaPendencia, descricao: e.target.value })}
+                  value={novaPendencia.description}
+                  onChange={(e) => setNovaPendencia({ ...novaPendencia, description: e.target.value })}
                   placeholder="Digite a descrição da pendência"
                 />
               </div>
@@ -291,122 +251,71 @@ const PendenciasObra = () => {
         </Dialog>
       </div>
 
-      {pendencias.length === 0 ? (
+      {listas.length === 0 ? (
         <div className="text-center py-12">
           <AlertCircle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
-          <p className="text-gray-500 mb-4">Nenhuma pendência cadastrada</p>
-          <Button onClick={() => setShowDialog(true)}>
-            <Plus className="w-4 h-4 mr-2" />
-            Adicionar Primeira Pendência
-          </Button>
+          <p className="text-gray-500 mb-4">Nenhuma lista encontrada</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Coluna: Pendente */}
-          <div>
-            <h2 className="font-semibold mb-4">Pendente</h2>
-            <div className="space-y-4">
-              {pendencias
-                .filter((p) => p.status === 'pendente')
-                .map((pendencia) => (
-                  <Card key={pendencia.id} className="p-4">
+          {listas.map((lista) => (
+            <div key={lista.id}>
+              <h2 className="font-semibold mb-4">{lista.title}</h2>
+              <div className="space-y-4">
+                {lista.cards.map((card) => (
+                  <Card key={card.id} className="p-4">
                     <div className="flex justify-between items-start mb-2">
-                      <h3 className="font-medium">{pendencia.nome}</h3>
+                      <h3 className="font-medium">{card.title}</h3>
                       <div className="flex gap-2">
+                        {lista.title !== 'A Fazer' && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => {
+                              const listaAnterior = listas.find(l => 
+                                l.title === (lista.title === 'Em Andamento' ? 'A Fazer' : 'Em Andamento')
+                              );
+                              if (listaAnterior) {
+                                handleMoverPendencia(card.id, listaAnterior.id);
+                              }
+                            }}
+                          >
+                            <MoveLeft className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {lista.title !== 'Concluído' && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => {
+                              const proximaLista = listas.find(l => 
+                                l.title === (lista.title === 'A Fazer' ? 'Em Andamento' : 'Concluído')
+                              );
+                              if (proximaLista) {
+                                handleMoverPendencia(card.id, proximaLista.id);
+                              }
+                            }}
+                          >
+                            <MoveRight className="h-4 w-4" />
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => handleMoverPendencia(pendencia.id, 'em_andamento')}
-                        >
-                          <MoveRight className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleExcluirPendencia(pendencia.id)}
+                          onClick={() => handleExcluirPendencia(card.id)}
                         >
                           <Trash2 className="h-4 w-4 text-red-500" />
                         </Button>
                       </div>
                     </div>
-                    <p className="text-sm text-gray-500">{pendencia.descricao}</p>
+                    {card.description && (
+                      <p className="text-sm text-gray-500">{card.description}</p>
+                    )}
                   </Card>
                 ))}
+              </div>
             </div>
-          </div>
-
-          {/* Coluna: Em Andamento */}
-          <div>
-            <h2 className="font-semibold mb-4">Em Andamento</h2>
-            <div className="space-y-4">
-              {pendencias
-                .filter((p) => p.status === 'em_andamento')
-                .map((pendencia) => (
-                  <Card key={pendencia.id} className="p-4">
-                    <div className="flex justify-between items-start mb-2">
-                      <h3 className="font-medium">{pendencia.nome}</h3>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleMoverPendencia(pendencia.id, 'pendente')}
-                        >
-                          <MoveLeft className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleMoverPendencia(pendencia.id, 'concluida')}
-                        >
-                          <MoveRight className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleExcluirPendencia(pendencia.id)}
-                        >
-                          <Trash2 className="h-4 w-4 text-red-500" />
-                        </Button>
-                      </div>
-                    </div>
-                    <p className="text-sm text-gray-500">{pendencia.descricao}</p>
-                  </Card>
-                ))}
-            </div>
-          </div>
-
-          {/* Coluna: Concluído */}
-          <div>
-            <h2 className="font-semibold mb-4">Concluído</h2>
-            <div className="space-y-4">
-              {pendencias
-                .filter((p) => p.status === 'concluida')
-                .map((pendencia) => (
-                  <Card key={pendencia.id} className="p-4">
-                    <div className="flex justify-between items-start mb-2">
-                      <h3 className="font-medium">{pendencia.nome}</h3>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleMoverPendencia(pendencia.id, 'em_andamento')}
-                        >
-                          <MoveLeft className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleExcluirPendencia(pendencia.id)}
-                        >
-                          <Trash2 className="h-4 w-4 text-red-500" />
-                        </Button>
-                      </div>
-                    </div>
-                    <p className="text-sm text-gray-500">{pendencia.descricao}</p>
-                  </Card>
-                ))}
-            </div>
-          </div>
+          ))}
         </div>
       )}
     </div>

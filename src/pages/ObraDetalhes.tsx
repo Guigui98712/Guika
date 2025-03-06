@@ -15,7 +15,7 @@ import { ptBR } from 'date-fns/locale';
 import { buscarObra, listarRegistrosDiario, gerarRelatorioSemanal, atualizarObra } from '@/lib/api';
 import { useToast } from '@/components/ui/use-toast';
 import GraficoEtapas from '@/components/GraficoEtapas';
-import { obterPendencias } from '@/lib/trello';
+import { obterQuadroObra } from '@/lib/trello-local';
 
 interface DiarioRegistro {
   id: number;
@@ -203,18 +203,18 @@ const ObraDetalhes = () => {
   }, [id]);
 
   useEffect(() => {
-    if (obra?.trello_board_id) {
+    if (obra) {
       carregarPendencias();
     }
   }, [obra]);
 
   const carregarPendencias = async () => {
     try {
-      if (!obra?.trello_board_id) return;
+      if (!obra) return;
 
-      const board = await obterPendencias(obra.trello_board_id);
-      const pendentes = board.lists.find(l => l.name === 'Pendente')?.cards.length || 0;
-      const emAndamento = board.lists.find(l => l.name === 'Em Andamento')?.cards.length || 0;
+      const quadro = await obterQuadroObra(obra.id);
+      const pendentes = quadro.lists.find(l => l.title === 'A Fazer')?.cards.length || 0;
+      const emAndamento = quadro.lists.find(l => l.title === 'Em Andamento')?.cards.length || 0;
       
       setNumeroPendencias(pendentes + emAndamento);
     } catch (error) {
