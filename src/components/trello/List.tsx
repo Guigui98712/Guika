@@ -183,7 +183,10 @@ export function List({ list, allLists, onUpdate, onDelete }: ListProps) {
       await atualizarCard(cardId, updates);
       const card = list.cards.find(c => c.id === cardId);
       if (card) {
+        // Garantir que estamos usando a versão mais atualizada do card
         const updatedCard = { ...card, ...updates };
+        
+        // Atualizar imediatamente o estado local
         onUpdate(list.id, {
           cards: list.cards.map(c => c.id === cardId ? updatedCard : c)
         });
@@ -301,29 +304,36 @@ export function List({ list, allLists, onUpdate, onDelete }: ListProps) {
         onUpdate(list.id, {
           cards: list.cards.map(c => c.id === cardId ? updatedCard : c)
         });
+        
+        toast({
+          title: "Etiqueta removida",
+          description: "Etiqueta removida com sucesso!"
+        });
       } else {
         await adicionarEtiqueta(cardId, labelId);
         const label = availableLabels.find(l => l.id === labelId);
         if (label) {
+          // Remover qualquer etiqueta existente com o mesmo ID antes de adicionar a nova
+          const filteredLabels = card.labels.filter(l => l.id !== labelId);
           const updatedCard = {
             ...card,
-            labels: [...card.labels.filter(l => l.id !== labelId), label]
+            labels: [...filteredLabels, label]
           };
           onUpdate(list.id, {
             cards: list.cards.map(c => c.id === cardId ? updatedCard : c)
           });
+          
+          toast({
+            title: "Etiqueta adicionada",
+            description: "Etiqueta adicionada com sucesso!"
+          });
         }
       }
-
-      toast({
-        title: "Sucesso",
-        description: hasLabel ? "Etiqueta removida com sucesso!" : "Etiqueta adicionada com sucesso!"
-      });
     } catch (error) {
-      console.error('Erro ao alternar etiqueta:', error);
+      console.error('Erro ao gerenciar etiqueta:', error);
       toast({
         title: "Erro",
-        description: "Erro ao alternar etiqueta",
+        description: "Erro ao gerenciar etiqueta",
         variant: "destructive"
       });
     }
@@ -402,10 +412,6 @@ export function List({ list, allLists, onUpdate, onDelete }: ListProps) {
             card={card}
             onDelete={handleDeleteCard}
             onUpdate={handleUpdateCard}
-            onMoveLeft={allLists.findIndex(l => l.id === list.id) > 0 ? 
-              () => handleMoveCard(card.id, 'left') : undefined}
-            onMoveRight={allLists.findIndex(l => l.id === list.id) < allLists.length - 1 ? 
-              () => handleMoveCard(card.id, 'right') : undefined}
             onAddChecklist={handleAddChecklist}
             onAddComment={handleAddComment}
             onAddAttachment={handleAddAttachment}

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Card as CardUI, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Trash2, MoveLeft, MoveRight } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { TrelloCard, TrelloChecklist, TrelloChecklistItem, TrelloLabel } from '@/types/trello';
 import { criarChecklist, adicionarItemChecklist, atualizarItemChecklist, excluirItemChecklist, excluirChecklist } from '@/lib/trello-local';
 import { CardChecklist } from './CardChecklist';
@@ -12,10 +12,7 @@ import { CardExpanded } from './CardExpanded';
 
 interface CardProps {
   card: TrelloCard;
-  listTitle: string;
   onDelete: (cardId: number) => void;
-  onMoveLeft: (cardId: number) => void;
-  onMoveRight: (cardId: number) => void;
   onUpdate: (cardId: number, updates: Partial<TrelloCard>) => void;
   onAddChecklist: (cardId: number, title: string) => Promise<void>;
   onAddComment: (cardId: number, content: string) => Promise<void>;
@@ -26,10 +23,7 @@ interface CardProps {
 
 export function Card({
   card,
-  listTitle,
   onDelete,
-  onMoveLeft,
-  onMoveRight,
   onUpdate,
   onAddChecklist,
   onAddComment,
@@ -79,30 +73,6 @@ export function Card({
               )}
             </div>
             <div className="flex items-center space-x-1">
-              {listTitle !== 'A Fazer' && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onMoveLeft(card.id);
-                  }}
-                >
-                  <MoveLeft className="h-4 w-4" />
-                </Button>
-              )}
-              {listTitle !== 'Concluído' && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onMoveRight(card.id);
-                  }}
-                >
-                  <MoveRight className="h-4 w-4" />
-                </Button>
-              )}
               <Button
                 variant="ghost"
                 size="icon"
@@ -115,26 +85,6 @@ export function Card({
               </Button>
             </div>
           </div>
-
-          {/* Etiquetas */}
-          {card.labels.length > 0 && (
-            <div className="flex flex-wrap gap-1 mb-2">
-              {card.labels.map((label) => (
-                <div
-                  key={label.id}
-                  className="px-2 py-0.5 rounded text-xs text-white"
-                  style={{ backgroundColor: label.color }}
-                >
-                  {label.title}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Descrição */}
-          {card.description && (
-            <p className="text-sm text-gray-500 mt-2">{card.description}</p>
-          )}
 
           {/* Indicadores */}
           <div className="flex gap-2 mt-2 text-xs text-gray-500">

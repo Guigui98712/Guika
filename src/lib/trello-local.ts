@@ -179,15 +179,25 @@ export const obterQuadroObra = async (obraId: number): Promise<TrelloBoard> => {
       items: (checklistItems || []).filter(item => item.checklist_id === checklist.id)
     }));
 
-    const cardsWithEverything = (cards || []).map(card => ({
-      ...card,
-      comments: comments?.filter(comment => comment.card_id === card.id) || [],
-      attachments: attachments?.filter(attachment => attachment.card_id === card.id) || [],
-      labels: cardLabels
-        ?.filter(cl => cl.card_id === card.id)
-        .map(cl => cl.label) || [],
-      checklists: checklistsWithItems.filter(checklist => checklist.card_id === card.id)
-    }));
+    const cardsWithEverything = (cards || []).map(card => {
+      // Remover etiquetas duplicadas usando Map
+      const uniqueLabels = Array.from(
+        new Map(
+          cardLabels
+            ?.filter(cl => cl.card_id === card.id)
+            .map(cl => cl.label)
+            .map(label => [label.id, label]) || []
+        ).values()
+      );
+
+      return {
+        ...card,
+        comments: comments?.filter(comment => comment.card_id === card.id) || [],
+        attachments: attachments?.filter(attachment => attachment.card_id === card.id) || [],
+        labels: uniqueLabels,
+        checklists: checklistsWithItems.filter(checklist => checklist.card_id === card.id)
+      };
+    });
 
     const listsWithCards = lists.map(list => ({
       ...list,
@@ -677,7 +687,12 @@ export const buscarEtiquetas = async (): Promise<TrelloLabel[]> => {
       throw error;
     }
 
-    return data || [];
+    // Garantir que não há etiquetas duplicadas
+    const uniqueLabels = Array.from(
+      new Map(data?.map(label => [label.id, label]) || []).values()
+    );
+
+    return uniqueLabels;
   } catch (error) {
     console.error('Erro ao buscar etiquetas:', error);
     throw error;

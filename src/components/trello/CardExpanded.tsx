@@ -28,7 +28,8 @@ import {
   atualizarItemChecklist, 
   adicionarItemChecklist, 
   excluirItemChecklist, 
-  excluirChecklist 
+  excluirChecklist,
+  excluirComentario
 } from '@/lib/trello-local';
 
 interface CardExpandedProps {
@@ -61,16 +62,13 @@ export function CardExpanded({
   const [newCommentContent, setNewCommentContent] = useState('');
   const [isAddingComment, setIsAddingComment] = useState(false);
   const [localChecklists, setLocalChecklists] = useState<TrelloChecklist[]>(card.checklists || []);
+  const [localComments, setLocalComments] = useState<TrelloComment[]>(card.comments || []);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setLocalChecklists(card.checklists || []);
-  }, [card.checklists]);
-
-  const handleUpdateCard = (updates: Partial<TrelloCard>) => {
-    const updatedCard = { ...card, ...updates };
-    onUpdate(card.id, updatedCard);
-  };
+    setLocalComments(card.comments || []);
+  }, [card.checklists, card.comments]);
 
   const handleAddChecklist = async () => {
     try {
@@ -131,6 +129,36 @@ export function CardExpanded({
     }
   };
 
+  const handleDeleteComment = async (commentId: number) => {
+    try {
+      // Atualizar o estado local primeiro para feedback imediato
+      const updatedComments = localComments.filter(comment => comment.id !== commentId);
+      setLocalComments(updatedComments);
+      
+      // Excluir o comentário no banco de dados
+      await excluirComentario(commentId);
+      
+      // Propagar a atualização para o componente pai
+      onUpdate(card.id, { 
+        ...card,
+        comments: updatedComments 
+      });
+      
+      toast({
+        title: "Sucesso",
+        description: "Comentário excluído com sucesso!"
+      });
+    } catch (error) {
+      // Restaurar o estado anterior em caso de erro
+      setLocalComments(card.comments || []);
+      toast({
+        title: "Erro",
+        description: "Erro ao excluir comentário",
+        variant: "destructive"
+      });
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -150,28 +178,7 @@ export function CardExpanded({
             />
           </div>
 
-          {/* Etiquetas */}
-          <div>
-            <h3 className="font-medium mb-2 flex items-center gap-2">
-              <Tag className="h-4 w-4" />
-              Etiquetas
-            </h3>
-            <div className="flex flex-wrap gap-2">
-              {availableLabels.map((label) => (
-                <Badge
-                  key={label.id}
-                  style={{ 
-                    backgroundColor: label.color,
-                    opacity: card.labels.some(l => l.id === label.id) ? 1 : 0.5,
-                    cursor: 'pointer'
-                  }}
-                  onClick={() => onToggleLabel(card.id, label.id)}
-                >
-                  {label.title}
-                </Badge>
-              ))}
-            </div>
-          </div>
+          {/* Etiquetas - Removidas para evitar duplicação */}
 
           <Tabs defaultValue="checklists">
             <TabsList>
@@ -209,8 +216,17 @@ export function CardExpanded({
                         }
                         return cl;
                       });
+                      
+                      // Atualizar o estado local
                       setLocalChecklists(updatedChecklists);
-                      handleUpdateCard({ checklists: updatedChecklists });
+                      
+                      // Propagar a atualização para o componente pai
+                      // Isso garante que o indicador de checklist seja atualizado imediatamente
+                      onUpdate(card.id, { 
+                        ...card,
+                        checklists: updatedChecklists 
+                      });
+                      
                       return Promise.resolve();
                     } catch (error) {
                       toast({
@@ -233,8 +249,16 @@ export function CardExpanded({
                         }
                         return cl;
                       });
+                      
+                      // Atualizar o estado local
                       setLocalChecklists(updatedChecklists);
-                      handleUpdateCard({ checklists: updatedChecklists });
+                      
+                      // Propagar a atualização para o componente pai
+                      onUpdate(card.id, { 
+                        ...card,
+                        checklists: updatedChecklists 
+                      });
+                      
                       return Promise.resolve(true);
                     } catch (error) {
                       toast({
@@ -256,10 +280,18 @@ export function CardExpanded({
                         }
                         return cl;
                       });
+                      
+                      // Atualizar o estado local
                       setLocalChecklists(updatedChecklists);
                       
                       await excluirItemChecklist(itemId);
-                      handleUpdateCard({ checklists: updatedChecklists });
+                      
+                      // Propagar a atualização para o componente pai
+                      onUpdate(card.id, { 
+                        ...card,
+                        checklists: updatedChecklists 
+                      });
+                      
                       return Promise.resolve();
                     } catch (error) {
                       setLocalChecklists(card.checklists || []);
@@ -276,10 +308,17 @@ export function CardExpanded({
                       const checklistToDelete = checklist;
                       
                       const updatedChecklists = localChecklists.filter(cl => cl.id !== checklist.id);
+                      
+                      // Atualizar o estado local
                       setLocalChecklists(updatedChecklists);
                       
                       await excluirChecklist(checklist.id);
-                      handleUpdateCard({ checklists: updatedChecklists });
+                      
+                      // Propagar a atualização para o componente pai
+                      onUpdate(card.id, { 
+                        ...card,
+                        checklists: updatedChecklists 
+                      });
                       
                       toast({
                         title: "Sucesso",
@@ -345,7 +384,7 @@ export function CardExpanded({
               </div>
 
               <div className="space-y-4">
-                {card.comments.map((comment) => (
+                {localComments.map((comment) => (
                   <div key={comment.id} className="bg-gray-50 p-4 rounded-lg">
                     <div className="flex justify-between items-start">
                       <div>
@@ -357,6 +396,14 @@ export function CardExpanded({
                         </p>
                         <p className="mt-1">{comment.content}</p>
                       </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleDeleteComment(comment.id)}
+                        className="h-8 w-8 text-red-500 hover:text-red-700"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
                     </div>
                   </div>
                 ))}
