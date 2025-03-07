@@ -21,6 +21,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import html2pdf from "html2pdf.js";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 // Interface para o funcionário
 interface Funcionario {
@@ -52,14 +58,20 @@ const Relatorios = () => {
   const [novoFuncionario, setNovoFuncionario] = useState("");
   
   // Estado para os funcionários e suas presenças
-  const [funcionarios, setFuncionarios] = useState<Funcionario[]>([
-    { id: '1', nome: 'João Silva', presencas: {} },
-    { id: '2', nome: 'Maria Oliveira', presencas: {} },
-    { id: '3', nome: 'Pedro Santos', presencas: {} }
-  ]);
+  const [funcionarios, setFuncionarios] = useState<Funcionario[]>([]);
   
   // Estado para armazenar presenças por semana
   const [presencasPorSemana, setPresencasPorSemana] = useState<PresencasPorSemana>({});
+
+  // Estado para armazenar funcionários por semana
+  const [funcionariosPorSemana, setFuncionariosPorSemana] = useState<{[semanaKey: string]: Funcionario[]}>({});
+
+  // Estado para o diálogo de detalhes do diário
+  const [diarioSelecionado, setDiarioSelecionado] = useState<any | null>(null);
+  const [showDiarioDialog, setShowDiarioDialog] = useState(false);
+  
+  // Estado para armazenar os dados completos dos diários
+  const [diariosCompletos, setDiariosCompletos] = useState<any[]>([]);
 
   // Função para obter os dias úteis da semana (segunda a sexta)
   const getDiasUteis = (dataInicio: Date) => {
@@ -76,49 +88,161 @@ const Relatorios = () => {
     return dias;
   };
 
+  // Efeito para carregar dados iniciais
   useEffect(() => {
-    carregarRelatoriosAnteriores();
-    carregarDiarios();
+    if (id) {
+      carregarRelatoriosAnteriores();
+      carregarDiarios();
+      
+      // Carregar funcionários e presenças do localStorage
+      carregarFuncionariosDoLocalStorage();
+      
+      // Carregar presenças para a semana atual
+      const semanaKey = format(startOfWeek(semanaAtual, { weekStartsOn: 0 }), 'yyyy-MM-dd');
+      carregarFuncionariosDaSemana(semanaKey);
+    }
   }, [id]);
-  
+
   // Efeito para carregar presenças quando a semana muda
   useEffect(() => {
     const semanaKey = format(startOfWeek(semanaAtual, { weekStartsOn: 0 }), 'yyyy-MM-dd');
     console.log('[DEBUG] Mudança de semana. Semana atual:', semanaKey);
-    console.log('[DEBUG] Presenças por semana:', presencasPorSemana);
     
-    const presencasDaSemana = presencasPorSemana[semanaKey];
-    
-    if (presencasDaSemana) {
-      console.log('[DEBUG] Carregando presenças salvas para a semana:', presencasDaSemana);
-      // Se já temos presenças salvas para esta semana, carregá-las
-      setFuncionarios(prevFuncionarios => prevFuncionarios.map(func => ({
-        ...func,
-        presencas: presencasDaSemana[func.id] || {}
-      })));
-    } else {
-      console.log('[DEBUG] Nenhuma presença salva para esta semana. Limpando presenças.');
-      // Se não temos presenças para esta semana, limpar as presenças
-      setFuncionarios(prevFuncionarios => prevFuncionarios.map(func => ({
-        ...func,
-        presencas: {}
-      })));
-    }
-  }, [semanaAtual, presencasPorSemana]);
+    // Carregar funcionários para a semana atual
+    carregarFuncionariosDaSemana(semanaKey);
+  }, [semanaAtual, funcionariosPorSemana]);
 
-  // Efeito para carregar presenças do localStorage quando o componente é montado
-  useEffect(() => {
-    const presencasSalvas = localStorage.getItem('presencasPorSemana');
-    if (presencasSalvas) {
-      try {
+  // Função para carregar funcionários do localStorage
+  const carregarFuncionariosDoLocalStorage = () => {
+    try {
+      // Carregar funcionários por semana
+      const funcionariosSalvos = localStorage.getItem('funcionariosPorSemana');
+      if (funcionariosSalvos) {
+        const funcionariosParsed = JSON.parse(funcionariosSalvos);
+        console.log('[DEBUG] Carregando funcionários do localStorage:', funcionariosParsed);
+        setFuncionariosPorSemana(funcionariosParsed);
+      }
+      
+      // Carregar presenças por semana
+      const presencasSalvas = localStorage.getItem('presencasPorSemana');
+      if (presencasSalvas) {
         const presencasParsed = JSON.parse(presencasSalvas);
         console.log('[DEBUG] Carregando presenças do localStorage:', presencasParsed);
         setPresencasPorSemana(presencasParsed);
-      } catch (error) {
-        console.error('[DEBUG] Erro ao carregar presenças do localStorage:', error);
+      }
+    } catch (error) {
+      console.error('[DEBUG] Erro ao carregar dados do localStorage:', error);
+    }
+  };
+
+  // Função para carregar funcionários da semana atual
+  const carregarFuncionariosDaSemana = (semanaKey: string) => {
+    // Verificar se já temos funcionários para esta semana
+    if (funcionariosPorSemana[semanaKey]) {
+      console.log('[DEBUG] Usando funcionários já carregados para a semana:', funcionariosPorSemana[semanaKey]);
+      setFuncionarios(funcionariosPorSemana[semanaKey]);
+    } else {
+      // Se não temos funcionários para esta semana, verificar se temos funcionários em outras semanas
+      const todasSemanas = Object.keys(funcionariosPorSemana);
+      if (todasSemanas.length > 0) {
+        // Usar funcionários da semana mais recente
+        const semanaRecente = todasSemanas[todasSemanas.length - 1];
+        const funcionariosRecentes = funcionariosPorSemana[semanaRecente];
+        
+        // Criar novos funcionários para esta semana, mas sem presenças
+        const novosFuncionarios = funcionariosRecentes.map(func => ({
+          ...func,
+          presencas: {}
+        }));
+        
+        console.log('[DEBUG] Criando funcionários para nova semana baseados em semana anterior:', novosFuncionarios);
+        
+        // Atualizar estado
+        setFuncionarios(novosFuncionarios);
+        setFuncionariosPorSemana(prev => ({
+          ...prev,
+          [semanaKey]: novosFuncionarios
+        }));
+        
+        // Salvar no localStorage
+        salvarFuncionariosNoLocalStorage({
+          ...funcionariosPorSemana,
+          [semanaKey]: novosFuncionarios
+        });
+      } else {
+        // Verificar se temos dados salvos no localStorage
+        const funcionariosSalvos = localStorage.getItem('funcionariosPorSemana');
+        
+        if (funcionariosSalvos) {
+          try {
+            const funcionariosParsed = JSON.parse(funcionariosSalvos);
+            
+            // Verificar se temos funcionários em alguma semana salva
+            const semanasLocalStorage = Object.keys(funcionariosParsed);
+            
+            if (semanasLocalStorage.length > 0) {
+              // Usar funcionários da semana mais recente do localStorage
+              const semanaRecenteLS = semanasLocalStorage[semanasLocalStorage.length - 1];
+              const funcionariosRecentesLS = funcionariosParsed[semanaRecenteLS];
+              
+              // Criar novos funcionários para esta semana, mas sem presenças
+              const novosFuncionarios = funcionariosRecentesLS.map((func: Funcionario) => ({
+                ...func,
+                presencas: {}
+              }));
+              
+              console.log('[DEBUG] Criando funcionários para nova semana baseados em localStorage:', novosFuncionarios);
+              
+              // Atualizar estado
+              setFuncionarios(novosFuncionarios);
+              setFuncionariosPorSemana(prev => ({
+                ...prev,
+                [semanaKey]: novosFuncionarios
+              }));
+              
+              // Salvar no localStorage
+              salvarFuncionariosNoLocalStorage({
+                ...funcionariosPorSemana,
+                [semanaKey]: novosFuncionarios
+              });
+              
+              return; // Sair da função, pois já carregamos os funcionários
+            }
+          } catch (error) {
+            console.error('[DEBUG] Erro ao processar funcionários do localStorage:', error);
+          }
+        }
+        
+        // Se não temos funcionários em nenhuma semana e não há dados no localStorage, criar funcionários padrão
+        const funcionariosPadrao = [];
+        
+        console.log('[DEBUG] Criando lista vazia de funcionários para a semana');
+        
+        // Atualizar estado
+        setFuncionarios(funcionariosPadrao);
+        setFuncionariosPorSemana(prev => ({
+          ...prev,
+          [semanaKey]: funcionariosPadrao
+        }));
+        
+        // Salvar no localStorage
+        salvarFuncionariosNoLocalStorage({
+          ...funcionariosPorSemana,
+          [semanaKey]: funcionariosPadrao
+        });
       }
     }
-  }, []);
+  };
+
+  // Função para salvar funcionários no localStorage
+  const salvarFuncionariosNoLocalStorage = (funcionarios: {[semanaKey: string]: Funcionario[]}) => {
+    try {
+      localStorage.setItem('funcionariosPorSemana', JSON.stringify(funcionarios));
+      console.log('[DEBUG] Funcionários salvos no localStorage');
+    } catch (error) {
+      console.error('[DEBUG] Erro ao salvar funcionários no localStorage:', error);
+    }
+  };
 
   const carregarDiarios = async () => {
     if (!id) return;
@@ -126,13 +250,16 @@ const Relatorios = () => {
     try {
       const { data, error } = await supabase
         .from('diario_obra')
-        .select('data')
+        .select('*')
         .eq('obra_id', id);
 
       if (error) throw error;
 
       const datas = (data || []).map(d => parseISO(d.data));
       setDiasComDiario(datas);
+      
+      // Armazenar os dados completos dos diários para uso posterior
+      setDiariosCompletos(data || []);
     } catch (error) {
       console.error('Erro ao carregar diários:', error);
     }
@@ -311,88 +438,11 @@ const Relatorios = () => {
     }
   };
 
-  // Adicionar novo funcionário
-  const adicionarFuncionario = () => {
-    if (!novoFuncionario.trim()) {
-      toast({
-        title: "Erro",
-        description: "Digite o nome do funcionário.",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    const novoFunc = {
-      id: Date.now().toString(),
-      nome: novoFuncionario,
-      presencas: {}
-    };
-
-    const novosFuncionarios = [...funcionarios, novoFunc];
-    setFuncionarios(novosFuncionarios);
-    
-    // Atualizar também o estado de presenças por semana
-    const semanaKey = format(startOfWeek(semanaAtual, { weekStartsOn: 0 }), 'yyyy-MM-dd');
-    
-    // Obter as presenças atuais da semana ou inicializar um objeto vazio
-    const presencasAtuaisDaSemana = presencasPorSemana[semanaKey] || {};
-    
-    // Adicionar o novo funcionário às presenças da semana
-    const novoPresencasPorSemana = {
-      ...presencasPorSemana,
-      [semanaKey]: {
-        ...presencasAtuaisDaSemana,
-        [novoFunc.id]: {}
-      }
-    };
-    
-    setPresencasPorSemana(novoPresencasPorSemana);
-    
-    // Salvar no localStorage para persistência
-    try {
-      localStorage.setItem('presencasPorSemana', JSON.stringify(novoPresencasPorSemana));
-    } catch (error) {
-      console.error('[DEBUG] Erro ao salvar presenças no localStorage:', error);
-    }
-    
-    setNovoFuncionario("");
-  };
-
-  // Remover funcionário
-  const removerFuncionario = (id: string) => {
-    const novosFuncionarios = funcionarios.filter(f => f.id !== id);
-    setFuncionarios(novosFuncionarios);
-    
-    // Atualizar também o estado de presenças por semana
-    const semanaKey = format(startOfWeek(semanaAtual, { weekStartsOn: 0 }), 'yyyy-MM-dd');
-    
-    // Obter as presenças atuais da semana
-    const presencasAtuaisDaSemana = {...(presencasPorSemana[semanaKey] || {})};
-    
-    // Remover o funcionário das presenças da semana
-    if (presencasAtuaisDaSemana[id]) {
-      delete presencasAtuaisDaSemana[id];
-    }
-    
-    // Atualizar o estado
-    const novoPresencasPorSemana = {
-      ...presencasPorSemana,
-      [semanaKey]: presencasAtuaisDaSemana
-    };
-    
-    setPresencasPorSemana(novoPresencasPorSemana);
-    
-    // Salvar no localStorage para persistência
-    try {
-      localStorage.setItem('presencasPorSemana', JSON.stringify(novoPresencasPorSemana));
-    } catch (error) {
-      console.error('[DEBUG] Erro ao salvar presenças no localStorage:', error);
-    }
-  };
-
   // Alternar presença - agora com três estados: 0 (ausente), 0.5 (meio período), 1 (período completo)
   // Ordem alterada para: 0 -> 1 -> 0.5 -> 0
-  const togglePresenca = (funcionarioId: string, data: string) => {
+  const togglePresenca = async (funcionarioId: string, data: string) => {
+    const semanaKey = format(startOfWeek(semanaAtual, { weekStartsOn: 0 }), 'yyyy-MM-dd');
+    
     // Atualizar o estado dos funcionários
     const novosFuncionarios = funcionarios.map(func => {
       if (func.id === funcionarioId) {
@@ -417,8 +467,11 @@ const Relatorios = () => {
     
     setFuncionarios(novosFuncionarios);
     
-    // Atualizar também o estado de presenças por semana
-    const semanaKey = format(startOfWeek(semanaAtual, { weekStartsOn: 0 }), 'yyyy-MM-dd');
+    // Atualizar o estado de funcionários por semana
+    setFuncionariosPorSemana(prev => ({
+      ...prev,
+      [semanaKey]: novosFuncionarios
+    }));
     
     // Criar um objeto com as presenças atualizadas
     const presencasAtualizadas: {[funcionarioId: string]: {[data: string]: number}} = {};
@@ -441,6 +494,85 @@ const Relatorios = () => {
     } catch (error) {
       console.error('[DEBUG] Erro ao salvar presenças no localStorage:', error);
     }
+    
+    // Tentar salvar no banco de dados
+    try {
+      const funcionario = novosFuncionarios.find(f => f.id === funcionarioId);
+      if (!funcionario) {
+        console.error('[DEBUG] Funcionário não encontrado:', funcionarioId);
+        return;
+      }
+      
+      const novaPresenca = funcionario.presencas[data];
+      console.log('[DEBUG] Salvando presença no banco de dados:', {
+        obra_id: id,
+        funcionario_id: funcionarioId,
+        nome_funcionario: funcionario.nome,
+        data,
+        presenca: novaPresenca,
+        semana: semanaKey
+      });
+      
+      // Verificar se já existe um registro para esta combinação
+      const { data: registroExistente, error: erroConsulta } = await supabase
+        .from('presencas_funcionarios')
+        .select('*')
+        .eq('obra_id', id)
+        .eq('funcionario_id', funcionarioId)
+        .eq('data', data)
+        .single();
+      
+      if (erroConsulta && erroConsulta.code !== 'PGRST116') { // PGRST116 é o código para "nenhum resultado encontrado"
+        console.error('[DEBUG] Erro ao consultar registro existente:', erroConsulta);
+        // Não lançar erro, pois já salvamos no localStorage
+      } else {
+        if (registroExistente) {
+          console.log('[DEBUG] Atualizando registro existente:', registroExistente.id);
+          // Atualizar registro existente
+          const { error } = await supabase
+            .from('presencas_funcionarios')
+            .update({
+              presenca: novaPresenca,
+              semana: semanaKey,
+              nome_funcionario: funcionario.nome
+            })
+            .eq('id', registroExistente.id);
+          
+          if (error) {
+            console.error('[DEBUG] Erro ao atualizar registro:', error);
+            // Não lançar erro, pois já salvamos no localStorage
+          }
+        } else {
+          console.log('[DEBUG] Criando novo registro');
+          // Criar novo registro
+          const { error } = await supabase
+            .from('presencas_funcionarios')
+            .insert({
+              obra_id: id,
+              funcionario_id: funcionarioId,
+              nome_funcionario: funcionario.nome,
+              data,
+              presenca: novaPresenca,
+              semana: semanaKey
+            });
+          
+          if (error) {
+            console.error('[DEBUG] Erro ao criar novo registro:', error);
+            // Não lançar erro, pois já salvamos no localStorage
+          }
+        }
+      }
+      
+      console.log('[DEBUG] Presença salva com sucesso');
+    } catch (error) {
+      console.error('[DEBUG] Erro ao salvar presença no banco de dados:', error);
+      // Não lançar erro, pois já salvamos no localStorage
+    }
+    
+    toast({
+      title: "Sucesso",
+      description: "Presença atualizada com sucesso!"
+    });
   };
 
   // Filtrar relatórios do mês atual
@@ -468,7 +600,7 @@ const Relatorios = () => {
       d.getFullYear() === date.getFullYear()
     );
 
-    return temDiario ? 'bg-primary/10 font-bold' : '';
+    return temDiario ? 'bg-primary/10 font-bold cursor-pointer' : '';
   };
 
   // Obter os dias úteis da semana atual
@@ -517,8 +649,91 @@ const Relatorios = () => {
     }
   };
 
+  // Função para adicionar um novo funcionário
+  const adicionarFuncionario = () => {
+    if (!novoFuncionario.trim()) {
+      toast({
+        title: "Erro",
+        description: "O nome do funcionário não pode estar vazio.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const semanaKey = format(startOfWeek(semanaAtual, { weekStartsOn: 0 }), 'yyyy-MM-dd');
+    
+    // Criar novo funcionário com ID único
+    const novoFunc: Funcionario = {
+      id: Date.now().toString(), // ID único baseado no timestamp
+      nome: novoFuncionario.trim(),
+      presencas: {}
+    };
+    
+    // Atualizar o estado dos funcionários
+    const novosFuncionarios = [...funcionarios, novoFunc];
+    setFuncionarios(novosFuncionarios);
+    
+    // Atualizar o estado de funcionários por semana
+    const novoFuncionariosPorSemana = {
+      ...funcionariosPorSemana,
+      [semanaKey]: novosFuncionarios
+    };
+    
+    setFuncionariosPorSemana(novoFuncionariosPorSemana);
+    
+    // Salvar no localStorage
+    salvarFuncionariosNoLocalStorage(novoFuncionariosPorSemana);
+    
+    // Limpar o campo de entrada
+    setNovoFuncionario("");
+    
+    toast({
+      title: "Sucesso",
+      description: "Funcionário adicionado com sucesso!",
+    });
+  };
+  
+  // Função para remover um funcionário
+  const removerFuncionario = (funcionarioId: string) => {
+    const semanaKey = format(startOfWeek(semanaAtual, { weekStartsOn: 0 }), 'yyyy-MM-dd');
+    
+    // Filtrar o funcionário a ser removido
+    const novosFuncionarios = funcionarios.filter(func => func.id !== funcionarioId);
+    setFuncionarios(novosFuncionarios);
+    
+    // Atualizar o estado de funcionários por semana
+    const novoFuncionariosPorSemana = {
+      ...funcionariosPorSemana,
+      [semanaKey]: novosFuncionarios
+    };
+    
+    setFuncionariosPorSemana(novoFuncionariosPorSemana);
+    
+    // Salvar no localStorage
+    salvarFuncionariosNoLocalStorage(novoFuncionariosPorSemana);
+    
+    toast({
+      title: "Sucesso",
+      description: "Funcionário removido com sucesso!",
+    });
+  };
+
+  // Função para lidar com o clique em um dia do calendário
+  const handleDiaClick = (date: Date) => {
+    // Formatar a data para comparação
+    const dataFormatada = format(date, 'yyyy-MM-dd');
+    
+    // Buscar o diário correspondente à data clicada
+    const diario = diariosCompletos.find(d => d.data === dataFormatada);
+    
+    if (diario) {
+      setDiarioSelecionado(diario);
+      setShowDiarioDialog(true);
+    }
+  };
+
   return (
-    <div className="space-y-8">
+    <div className="container mx-auto py-8 space-y-8">
       <div className="flex items-center gap-4 mb-6">
         <Button 
           variant="outline" 
@@ -546,6 +761,7 @@ const Relatorios = () => {
                 locale={ptBR as unknown as string}
                 tileClassName={tileClassName}
                 className="w-full border rounded-lg shadow-sm"
+                onClickDay={handleDiaClick}
               />
 
               <div className="flex items-center justify-center gap-2 mt-4">
@@ -574,6 +790,7 @@ const Relatorios = () => {
                   <ChevronRight className="w-4 h-4" />
                 </Button>
               </div>
+
             </div>
 
             {/* Coluna da tabela de presença */}
@@ -771,6 +988,76 @@ const Relatorios = () => {
           </div>
         </Card>
       )}
+
+      {/* Dialog para mostrar detalhes do diário */}
+      <Dialog open={showDiarioDialog} onOpenChange={setShowDiarioDialog}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>
+              Diário de Obra - {diarioSelecionado ? format(parseISO(diarioSelecionado.data), 'dd/MM/yyyy') : ''}
+            </DialogTitle>
+          </DialogHeader>
+          
+          {diarioSelecionado && (
+            <div className="space-y-4">
+              <div>
+                <h4 className="font-medium">Descrição da Atividade</h4>
+                <p className="mt-1 text-gray-700 whitespace-pre-line">{diarioSelecionado.descricao}</p>
+              </div>
+              
+              {diarioSelecionado.observacoes && (
+                <div>
+                  <h4 className="font-medium">Observações</h4>
+                  <p className="mt-1 text-gray-700 whitespace-pre-line">{diarioSelecionado.observacoes}</p>
+                </div>
+              )}
+              
+              {diarioSelecionado.etapas_iniciadas && diarioSelecionado.etapas_iniciadas.length > 0 && (
+                <div>
+                  <h4 className="font-medium text-primary">Etapas Iniciadas</h4>
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {diarioSelecionado.etapas_iniciadas.map((etapa: string) => (
+                      <span key={etapa} className="bg-primary/10 text-primary text-sm px-2 py-1 rounded-md">
+                        {etapa}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {diarioSelecionado.etapas_concluidas && diarioSelecionado.etapas_concluidas.length > 0 && (
+                <div>
+                  <h4 className="font-medium text-green-700">Etapas Concluídas</h4>
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {diarioSelecionado.etapas_concluidas.map((etapa: string) => (
+                      <span key={etapa} className="bg-green-100 text-green-700 text-sm px-2 py-1 rounded-md">
+                        {etapa}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {diarioSelecionado.fotos && diarioSelecionado.fotos.length > 0 && (
+                <div>
+                  <h4 className="font-medium">Fotos ({diarioSelecionado.fotos.length})</h4>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mt-2">
+                    {diarioSelecionado.fotos.map((foto: string, index: number) => (
+                      <img
+                        key={index}
+                        src={foto}
+                        alt={`Foto ${index + 1}`}
+                        className="w-full h-24 object-cover rounded-lg cursor-pointer"
+                        onClick={() => window.open(foto, '_blank')}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

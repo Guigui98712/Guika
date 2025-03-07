@@ -213,10 +213,10 @@ const ObraDetalhes = () => {
       if (!obra) return;
 
       const quadro = await obterQuadroObra(obra.id);
-      const pendentes = quadro.lists.find(l => l.title === 'A Fazer')?.cards.length || 0;
-      const emAndamento = quadro.lists.find(l => l.title === 'Em Andamento')?.cards.length || 0;
+      const pendentes = quadro.lists.find(l => l.title === 'A Fazer')?.cards || [];
+      const emAndamento = quadro.lists.find(l => l.title === 'Em Andamento')?.cards || [];
       
-      setNumeroPendencias(pendentes + emAndamento);
+      setNumeroPendencias(pendentes.length + emAndamento.length);
     } catch (error) {
       console.error('Erro ao carregar pendências:', error);
     }
@@ -332,12 +332,22 @@ const ObraDetalhes = () => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <div className="p-4 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => navigate(`/obras/${id}/pendencias`)}>
+            <div 
+              className="p-4 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors" 
+              onClick={() => navigate(`/obras/${id}/pendencias`)}
+            >
               <h3 className="text-sm font-medium text-gray-500">Pendências</h3>
               <div className="mt-1 flex items-center justify-between">
                 <p className="text-lg font-semibold">{numeroPendencias}</p>
-                <AlertCircle className="w-5 h-5 text-yellow-500" />
+                <AlertCircle className={`w-5 h-5 ${numeroPendencias > 0 ? 'text-yellow-500' : 'text-green-500'}`} />
               </div>
+              <p className="text-sm text-gray-500 mt-1">
+                {numeroPendencias === 0 
+                  ? 'Nenhuma pendência' 
+                  : numeroPendencias === 1 
+                    ? '1 pendência' 
+                    : `${numeroPendencias} pendências`}
+              </p>
             </div>
           </div>
         </div>

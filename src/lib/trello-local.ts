@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { TrelloBoard, TrelloList, TrelloCard, TrelloChecklist, TrelloChecklistItem } from '@/types/trello';
 
 interface TrelloList {
   id: number;
@@ -23,6 +24,22 @@ interface TrelloCard {
 
 interface TrelloBoard {
   lists: (TrelloList & { cards: TrelloCard[] })[];
+}
+
+interface TrelloChecklist {
+  id: number;
+  card_id: number;
+  title: string;
+  position: number;
+  items: TrelloChecklistItem[];
+}
+
+interface TrelloChecklistItem {
+  id: number;
+  checklist_id: number;
+  title: string;
+  position: number;
+  checked: boolean;
 }
 
 // Função para criar listas padrão para uma obra
@@ -84,7 +101,7 @@ export const obterQuadroObra = async (obraId: number): Promise<TrelloBoard> => {
       return { lists: [] };
     }
 
-    // Buscar cards para todas as listas
+    // Buscar cards
     const { data: cards, error: cardsError } = await supabase
       .from('trello_cards')
       .select('*')
@@ -96,10 +113,85 @@ export const obterQuadroObra = async (obraId: number): Promise<TrelloBoard> => {
       throw cardsError;
     }
 
-    // Organizar cards por lista
+    // Buscar checklists e seus itens
+    const cardIds = (cards || []).map(c => c.id);
+    const { data: checklists, error: checklistsError } = await supabase
+      .from('trello_checklists')
+      .select('*')
+      .in('card_id', cardIds)
+      .order('position');
+
+    if (checklistsError) {
+      console.error('Erro ao buscar checklists:', checklistsError);
+      throw checklistsError;
+    }
+
+    const checklistIds = (checklists || []).map(c => c.id);
+    const { data: checklistItems, error: itemsError } = await supabase
+      .from('trello_checklist_items')
+      .select('*')
+      .in('checklist_id', checklistIds)
+      .order('position');
+
+    if (itemsError) {
+      console.error('Erro ao buscar itens dos checklists:', itemsError);
+      throw itemsError;
+    }
+
+    // Buscar comentários
+    const { data: comments, error: commentsError } = await supabase
+      .from('trello_comments')
+      .select('*')
+      .in('card_id', cardIds)
+      .order('created_at', { ascending: false });
+
+    if (commentsError) {
+      console.error('Erro ao buscar comentários:', commentsError);
+      throw commentsError;
+    }
+
+    // Buscar anexos
+    const { data: attachments, error: attachmentsError } = await supabase
+      .from('trello_attachments')
+      .select('*')
+      .in('card_id', cardIds)
+      .order('created_at', { ascending: false });
+
+    if (attachmentsError) {
+      console.error('Erro ao buscar anexos:', attachmentsError);
+      throw attachmentsError;
+    }
+
+    // Buscar etiquetas dos cards
+    const { data: cardLabels, error: cardLabelsError } = await supabase
+      .from('trello_card_labels')
+      .select('card_id, label:trello_labels(*)')
+      .in('card_id', cardIds);
+
+    if (cardLabelsError) {
+      console.error('Erro ao buscar etiquetas dos cards:', cardLabelsError);
+      throw cardLabelsError;
+    }
+
+    // Organizar os dados
+    const checklistsWithItems = (checklists || []).map(checklist => ({
+      ...checklist,
+      items: (checklistItems || []).filter(item => item.checklist_id === checklist.id)
+    }));
+
+    const cardsWithEverything = (cards || []).map(card => ({
+      ...card,
+      comments: comments?.filter(comment => comment.card_id === card.id) || [],
+      attachments: attachments?.filter(attachment => attachment.card_id === card.id) || [],
+      labels: cardLabels
+        ?.filter(cl => cl.card_id === card.id)
+        .map(cl => cl.label) || [],
+      checklists: checklistsWithItems.filter(checklist => checklist.card_id === card.id)
+    }));
+
     const listsWithCards = lists.map(list => ({
       ...list,
-      cards: (cards || []).filter(card => card.list_id === list.id)
+      cards: cardsWithEverything.filter(card => card.list_id === list.id)
     }));
 
     return { lists: listsWithCards };
@@ -119,7 +211,7 @@ export const criarCard = async (
 ): Promise<TrelloCard> => {
   try {
     // Obter a última posição na lista
-    const { data: lastCard, error: lastCardError } = await supabase
+    const { data: lastCard, error: positionError } = await supabase
       .from('trello_cards')
       .select('position')
       .eq('list_id', listId)
@@ -127,9 +219,9 @@ export const criarCard = async (
       .limit(1)
       .single();
 
-    if (lastCardError && lastCardError.code !== 'PGRST116') {
-      console.error('Erro ao buscar última posição:', lastCardError);
-      throw lastCardError;
+    if (positionError && positionError.code !== 'PGRST116') {
+      console.error('Erro ao buscar última posição:', positionError);
+      throw positionError;
     }
 
     const newPosition = (lastCard?.position || 0) + 1;
@@ -137,14 +229,13 @@ export const criarCard = async (
     // Criar novo card
     const { data, error } = await supabase
       .from('trello_cards')
-      .insert({
+      .insert([{
         list_id: listId,
         title,
         description,
         position: newPosition,
-        due_date: dueDate,
-        labels
-      })
+        due_date: dueDate
+      }])
       .select()
       .single();
 
@@ -157,7 +248,13 @@ export const criarCard = async (
       throw new Error('Card não foi criado');
     }
 
-    return data;
+    return {
+      ...data,
+      labels: [],
+      checklists: [],
+      comments: [],
+      attachments: []
+    };
   } catch (error) {
     console.error('Erro ao criar card:', error);
     throw error;
@@ -171,18 +268,13 @@ export const moverCard = async (
 ): Promise<void> => {
   try {
     // Obter a última posição na nova lista
-    const { data: lastCard, error: lastCardError } = await supabase
+    const { data: lastCard } = await supabase
       .from('trello_cards')
       .select('position')
       .eq('list_id', novaListaId)
       .order('position', { ascending: false })
       .limit(1)
       .single();
-
-    if (lastCardError && lastCardError.code !== 'PGRST116') {
-      console.error('Erro ao buscar última posição:', lastCardError);
-      throw lastCardError;
-    }
 
     const newPosition = (lastCard?.position || 0) + 1;
 
@@ -191,7 +283,8 @@ export const moverCard = async (
       .from('trello_cards')
       .update({
         list_id: novaListaId,
-        position: newPosition
+        position: newPosition,
+        updated_at: new Date().toISOString()
       })
       .eq('id', cardId);
 
@@ -269,6 +362,371 @@ export const reordenarCards = async (
     );
   } catch (error) {
     console.error('Erro ao reordenar cards:', error);
+    throw error;
+  }
+};
+
+// Função para criar um novo checklist
+export const criarChecklist = async (
+  cardId: number,
+  title: string
+): Promise<TrelloChecklist> => {
+  try {
+    // Obter a última posição
+    const { data: lastChecklist } = await supabase
+      .from('trello_checklists')
+      .select('position')
+      .eq('card_id', cardId)
+      .order('position', { ascending: false })
+      .limit(1)
+      .single();
+
+    const newPosition = (lastChecklist?.position || 0) + 1;
+
+    // Criar checklist
+    const { data, error } = await supabase
+      .from('trello_checklists')
+      .insert({
+        card_id: cardId,
+        title,
+        position: newPosition
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('Erro ao criar checklist:', error);
+      throw error;
+    }
+
+    return { ...data, items: [] };
+  } catch (error) {
+    console.error('Erro ao criar checklist:', error);
+    throw error;
+  }
+};
+
+// Função para adicionar um item ao checklist
+export const adicionarItemChecklist = async (
+  checklistId: number,
+  title: string
+): Promise<TrelloChecklistItem> => {
+  try {
+    // Obter a última posição
+    const { data: lastItem } = await supabase
+      .from('trello_checklist_items')
+      .select('position')
+      .eq('checklist_id', checklistId)
+      .order('position', { ascending: false })
+      .limit(1)
+      .single();
+
+    const newPosition = (lastItem?.position || 0) + 1;
+
+    // Criar item
+    const { data, error } = await supabase
+      .from('trello_checklist_items')
+      .insert({
+        checklist_id: checklistId,
+        title,
+        position: newPosition,
+        checked: false
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('Erro ao criar item do checklist:', error);
+      throw error;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Erro ao criar item do checklist:', error);
+    throw error;
+  }
+};
+
+// Função para atualizar um item do checklist
+export const atualizarItemChecklist = async (
+  itemId: number,
+  updates: Partial<TrelloChecklistItem>
+): Promise<TrelloChecklistItem> => {
+  try {
+    const { data, error } = await supabase
+      .from('trello_checklist_items')
+      .update(updates)
+      .eq('id', itemId)
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('Erro ao atualizar item do checklist:', error);
+      throw error;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Erro ao atualizar item do checklist:', error);
+    throw error;
+  }
+};
+
+// Função para excluir um item do checklist
+export const excluirItemChecklist = async (itemId: number): Promise<void> => {
+  try {
+    const { error } = await supabase
+      .from('trello_checklist_items')
+      .delete()
+      .eq('id', itemId);
+
+    if (error) {
+      console.error('Erro ao excluir item do checklist:', error);
+      throw error;
+    }
+  } catch (error) {
+    console.error('Erro ao excluir item do checklist:', error);
+    throw error;
+  }
+};
+
+// Função para excluir um checklist
+export const excluirChecklist = async (checklistId: number): Promise<void> => {
+  try {
+    // Primeiro exclui todos os itens do checklist
+    const { error: itemsError } = await supabase
+      .from('trello_checklist_items')
+      .delete()
+      .eq('checklist_id', checklistId);
+
+    if (itemsError) {
+      console.error('Erro ao excluir itens do checklist:', itemsError);
+      throw itemsError;
+    }
+
+    // Depois exclui o checklist
+    const { error } = await supabase
+      .from('trello_checklists')
+      .delete()
+      .eq('id', checklistId);
+
+    if (error) {
+      console.error('Erro ao excluir checklist:', error);
+      throw error;
+    }
+  } catch (error) {
+    console.error('Erro ao excluir checklist:', error);
+    throw error;
+  }
+};
+
+// Função para adicionar um comentário
+export const adicionarComentario = async (
+  cardId: number,
+  content: string,
+  userId: string
+): Promise<TrelloComment> => {
+  try {
+    const { data, error } = await supabase
+      .from('trello_comments')
+      .insert({
+        card_id: cardId,
+        user_id: userId,
+        content
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('Erro ao adicionar comentário:', error);
+      throw error;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Erro ao adicionar comentário:', error);
+    throw error;
+  }
+};
+
+// Função para excluir um comentário
+export const excluirComentario = async (commentId: number): Promise<void> => {
+  try {
+    const { error } = await supabase
+      .from('trello_comments')
+      .delete()
+      .eq('id', commentId);
+
+    if (error) {
+      console.error('Erro ao excluir comentário:', error);
+      throw error;
+    }
+  } catch (error) {
+    console.error('Erro ao excluir comentário:', error);
+    throw error;
+  }
+};
+
+// Função para adicionar um anexo
+export const adicionarAnexo = async (
+  cardId: number,
+  file: File
+): Promise<TrelloAttachment> => {
+  try {
+    // Upload do arquivo para o storage
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}_${file.name}`;
+    const { error: uploadError } = await supabase.storage
+      .from('attachments')
+      .upload(fileName, file);
+
+    if (uploadError) {
+      console.error('Erro ao fazer upload do arquivo:', uploadError);
+      throw uploadError;
+    }
+
+    // Obter URL pública do arquivo
+    const { data: { publicUrl } } = supabase.storage
+      .from('attachments')
+      .getPublicUrl(fileName);
+
+    // Criar registro do anexo
+    const { data, error } = await supabase
+      .from('trello_attachments')
+      .insert({
+        card_id: cardId,
+        file_name: file.name,
+        file_url: publicUrl,
+        file_type: file.type,
+        file_size: file.size
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      // Se houver erro ao criar o registro, tentar excluir o arquivo
+      await supabase.storage
+        .from('attachments')
+        .remove([fileName]);
+      
+      console.error('Erro ao criar registro do anexo:', error);
+      throw error;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Erro ao adicionar anexo:', error);
+    throw error;
+  }
+};
+
+// Função para excluir um anexo
+export const excluirAnexo = async (attachmentId: number): Promise<void> => {
+  try {
+    // Primeiro, buscar o anexo para obter o nome do arquivo
+    const { data: attachment, error: fetchError } = await supabase
+      .from('trello_attachments')
+      .select('file_url')
+      .eq('id', attachmentId)
+      .single();
+
+    if (fetchError) {
+      console.error('Erro ao buscar anexo:', fetchError);
+      throw fetchError;
+    }
+
+    // Extrair o nome do arquivo da URL
+    const fileName = attachment.file_url.split('/').pop();
+
+    // Excluir o arquivo do storage
+    const { error: storageError } = await supabase.storage
+      .from('attachments')
+      .remove([fileName]);
+
+    if (storageError) {
+      console.error('Erro ao excluir arquivo do storage:', storageError);
+      throw storageError;
+    }
+
+    // Excluir o registro do anexo
+    const { error } = await supabase
+      .from('trello_attachments')
+      .delete()
+      .eq('id', attachmentId);
+
+    if (error) {
+      console.error('Erro ao excluir registro do anexo:', error);
+      throw error;
+    }
+  } catch (error) {
+    console.error('Erro ao excluir anexo:', error);
+    throw error;
+  }
+};
+
+// Função para buscar etiquetas disponíveis
+export const buscarEtiquetas = async (): Promise<TrelloLabel[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('trello_labels')
+      .select('*')
+      .order('title');
+
+    if (error) {
+      console.error('Erro ao buscar etiquetas:', error);
+      throw error;
+    }
+
+    return data || [];
+  } catch (error) {
+    console.error('Erro ao buscar etiquetas:', error);
+    throw error;
+  }
+};
+
+// Função para adicionar uma etiqueta a um card
+export const adicionarEtiqueta = async (
+  cardId: number,
+  labelId: number
+): Promise<void> => {
+  try {
+    const { error } = await supabase
+      .from('trello_card_labels')
+      .insert({
+        card_id: cardId,
+        label_id: labelId
+      });
+
+    if (error) {
+      console.error('Erro ao adicionar etiqueta:', error);
+      throw error;
+    }
+  } catch (error) {
+    console.error('Erro ao adicionar etiqueta:', error);
+    throw error;
+  }
+};
+
+// Função para remover uma etiqueta de um card
+export const removerEtiqueta = async (
+  cardId: number,
+  labelId: number
+): Promise<void> => {
+  try {
+    const { error } = await supabase
+      .from('trello_card_labels')
+      .delete()
+      .match({
+        card_id: cardId,
+        label_id: labelId
+      });
+
+    if (error) {
+      console.error('Erro ao remover etiqueta:', error);
+      throw error;
+    }
+  } catch (error) {
+    console.error('Erro ao remover etiqueta:', error);
     throw error;
   }
 }; 
