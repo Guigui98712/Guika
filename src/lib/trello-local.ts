@@ -729,4 +729,112 @@ export const removerEtiqueta = async (
     console.error('Erro ao remover etiqueta:', error);
     throw error;
   }
+};
+
+// Função para criar uma nova lista
+export const criarLista = async (
+  obraId: number,
+  title: string
+): Promise<TrelloList> => {
+  try {
+    // Obter a última posição
+    const { data: lastList, error: positionError } = await supabase
+      .from('trello_lists')
+      .select('position')
+      .eq('obra_id', obraId)
+      .order('position', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (positionError && positionError.code !== 'PGRST116') {
+      console.error('Erro ao buscar última posição:', positionError);
+      throw positionError;
+    }
+
+    const newPosition = (lastList?.position || 0) + 1;
+
+    // Criar nova lista
+    const { data, error } = await supabase
+      .from('trello_lists')
+      .insert([{
+        obra_id: obraId,
+        title,
+        position: newPosition
+      }])
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Erro ao criar lista:', error);
+      throw error;
+    }
+
+    if (!data) {
+      throw new Error('Lista não foi criada');
+    }
+
+    return {
+      ...data,
+      cards: []
+    };
+  } catch (error) {
+    console.error('Erro ao criar lista:', error);
+    throw error;
+  }
+};
+
+// Função para excluir uma lista
+export const excluirLista = async (listId: number): Promise<void> => {
+  try {
+    // Primeiro, excluir todos os cards da lista
+    const { data: cards } = await supabase
+      .from('trello_cards')
+      .select('id')
+      .eq('list_id', listId);
+    
+    if (cards && cards.length > 0) {
+      // Excluir todos os cards da lista
+      for (const card of cards) {
+        await excluirCard(card.id);
+      }
+    }
+
+    // Excluir a lista
+    const { error } = await supabase
+      .from('trello_lists')
+      .delete()
+      .eq('id', listId);
+
+    if (error) {
+      console.error('Erro ao excluir lista:', error);
+      throw error;
+    }
+  } catch (error) {
+    console.error('Erro ao excluir lista:', error);
+    throw error;
+  }
+};
+
+// Função para renomear uma lista
+export const renomearLista = async (
+  listId: number,
+  newTitle: string
+): Promise<void> => {
+  try {
+    const { error } = await supabase
+      .from('trello_lists')
+      .update({
+        title: newTitle,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', listId);
+
+    if (error) {
+      console.error('Erro ao renomear lista:', error);
+      throw error;
+    }
+  } catch (error) {
+    console.error('Erro ao renomear lista:', error);
+    throw error;
+  }
 }; 
