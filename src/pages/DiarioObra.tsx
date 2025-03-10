@@ -196,8 +196,8 @@ const DiarioObra = () => {
   const handleSalvar = async () => {
     if (!obraId || !descricao.trim()) {
       toast({
-        title: "Erro",
-        description: "Por favor, preencha a descrição da atividade.",
+        title: "Descrição obrigatória",
+        description: "Por favor, preencha a descrição da atividade realizada na obra.",
         variant: "destructive"
       });
       return;
@@ -215,8 +215,8 @@ const DiarioObra = () => {
         } catch (error) {
           console.error('[DEBUG] Erro ao fazer upload da foto:', error);
           toast({
-            title: "Erro",
-            description: "Erro ao fazer upload de uma ou mais fotos.",
+            title: "Erro no upload de imagens",
+            description: "Não foi possível enviar uma ou mais fotos. Verifique o tamanho e formato das imagens.",
             variant: "destructive"
           });
         }
@@ -253,22 +253,22 @@ const DiarioObra = () => {
         setEtapasConcluidas([]);
 
         toast({
-          title: "Sucesso",
-          description: "Registro salvo com sucesso!",
+          title: "Registro salvo com sucesso! 📝",
+          description: "O registro do diário de obra foi salvo e está disponível para consulta.",
         });
       } catch (err: any) {
         console.error('[DEBUG] Erro específico ao salvar no Supabase:', err);
         toast({
-          title: "Erro no Banco de Dados",
-          description: `Não foi possível salvar o registro: ${err.message || 'Erro desconhecido'}`,
+          title: "Erro no banco de dados",
+          description: `Não foi possível salvar o registro: ${err.message || 'Erro desconhecido'}. Tente novamente mais tarde.`,
           variant: "destructive"
         });
       }
     } catch (error: any) {
       console.error('[DEBUG] Erro geral ao salvar:', error);
       toast({
-        title: "Erro",
-        description: `Não foi possível salvar o registro: ${error.message || 'Erro desconhecido'}`,
+        title: "Erro ao salvar",
+        description: `Não foi possível salvar o registro: ${error.message || 'Erro desconhecido'}. Verifique sua conexão.`,
         variant: "destructive"
       });
     } finally {
@@ -294,13 +294,13 @@ const DiarioObra = () => {
       setRegistroEmEdicao(null);
       
       toast({
-        title: "Sucesso",
-        description: "Registro atualizado com sucesso!",
+        title: "Registro atualizado! ✅",
+        description: "As informações do registro foram atualizadas com sucesso.",
       });
     } catch (error) {
       toast({
-        title: "Erro",
-        description: "Não foi possível atualizar o registro.",
+        title: "Erro na atualização",
+        description: "Não foi possível atualizar o registro. Tente novamente mais tarde.",
         variant: "destructive"
       });
     }
@@ -314,13 +314,13 @@ const DiarioObra = () => {
       await carregarDados();
       
       toast({
-        title: "Sucesso",
-        description: "Registro excluído com sucesso!",
+        title: "Registro excluído! 🗑️",
+        description: "O registro foi removido permanentemente do diário de obra.",
       });
     } catch (error) {
       toast({
-        title: "Erro",
-        description: "Não foi possível excluir o registro.",
+        title: "Erro ao excluir",
+        description: "Não foi possível excluir o registro. Ele pode estar sendo referenciado em outros lugares.",
         variant: "destructive"
       });
     }
@@ -847,8 +847,8 @@ const DiarioObra = () => {
                           } catch (error) {
                             console.error('[DEBUG] Erro ao fazer upload da foto na edição:', error);
                             toast({
-                              title: "Erro",
-                              description: "Erro ao fazer upload de uma ou mais fotos.",
+                              title: "Erro no upload de imagens",
+                              description: "Não foi possível enviar uma ou mais fotos. Verifique o tamanho e formato das imagens.",
                               variant: "destructive"
                             });
                           }

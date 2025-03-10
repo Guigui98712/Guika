@@ -4,9 +4,15 @@ import { ptBR } from 'date-fns/locale';
 import { obterQuadroObra } from './trello-local';
 
 // Função para gerar relatório semanal (versão alternativa)
-export const gerarRelatorioSemanalV2 = async (obraId: number, dataInicio: string, dataFim: string, presencas: any[] = []) => {
+export const gerarRelatorioSemanalV2 = async (
+  obraId: number, 
+  dataInicio: string, 
+  dataFim: string, 
+  presencas: any[] = [],
+  incluirPendencias: boolean = true
+) => {
   console.log('[DEBUG] Iniciando geração de relatório semanal V2...');
-  console.log('[DEBUG] Parâmetros:', { obraId, dataInicio, dataFim, presencas });
+  console.log('[DEBUG] Parâmetros:', { obraId, dataInicio, dataFim, presencas, incluirPendencias });
 
   try {
     // Buscar informações da obra
@@ -394,49 +400,52 @@ export const gerarRelatorioSemanalV2 = async (obraId: number, dataInicio: string
 
             <div class="info-block">
               <h3>Atividades Realizadas</h3>
-              <div class="atividades-container">
-                ${registros.length > 0 ? registros.map((registro) => {
-                  const dataFormatada = format(parseISO(registro.data), 'dd/MM/yyyy (EEEE)', { locale: ptBR });
-                  const descricaoLinhas = registro.descricao
-                    .split('\n')
-                    .filter(linha => 
-                      !linha.trim().startsWith('Iniciada a etapa:') && 
-                      !linha.trim().startsWith('Concluída a etapa:')
-                    );
-                  
-                  return `
-                    <div class="atividade-item">
-                      <div style="font-weight: 600; color: #0369a1; margin-bottom: 5px;">${dataFormatada}</div>
-                      <div class="registro-descricao">
-                        ${descricaoLinhas.join('<br>')}
-                        
-                        ${registro.etapas_iniciadas?.length ? `
-                          <div style="margin-top: 8px">
-                            ${registro.etapas_iniciadas.map(etapa => 
-                              `<div class="etapa-inicio">Etapa iniciada: ${etapa}</div>`
-                            ).join('')}
-                          </div>
-                        ` : ''}
-                        
-                        ${registro.etapas_concluidas?.length ? `
-                          <div style="margin-top: 8px">
-                            ${registro.etapas_concluidas.map(etapa => 
-                              `<div class="etapa-fim">Etapa concluída: ${etapa}</div>`
-                            ).join('')}
-                          </div>
-                        ` : ''}
-                      </div>
+              <div>
+                ${registros.length > 0 ? 
+                  `<div class="atividades-container">
+                    ${registros.map(registro => {
+                      // Filtrar linhas que não são de etapas
+                      const descricaoLinhas = registro.descricao
+                        .split('\n')
+                        .filter(linha => 
+                          !linha.trim().startsWith('Iniciada a etapa:') && 
+                          !linha.trim().startsWith('Concluída a etapa:')
+                        );
                       
-                      ${registro.fotos?.length ? `
-                        <div class="foto-container">
-                          ${registro.fotos.map(foto => 
-                            `<img src="${foto}" alt="Foto da atividade" class="foto" onerror="this.style.display='none'">`
-                          ).join('')}
+                      return `
+                        <div class="atividade-item">
+                          <div class="registro-descricao">
+                            ${descricaoLinhas.join('<br>')}
+                            
+                            ${registro.etapas_iniciadas?.length ? `
+                              <div style="margin-top: 4px">
+                                ${registro.etapas_iniciadas.map(etapa => 
+                                  `<span class="etapa-inicio">Etapa iniciada: ${etapa}</span>`
+                                ).join(', ')}
+                              </div>
+                            ` : ''}
+                            
+                            ${registro.etapas_concluidas?.length ? `
+                              <div style="margin-top: 4px">
+                                ${registro.etapas_concluidas.map(etapa => 
+                                  `<span class="etapa-fim">Etapa concluída: ${etapa}</span>`
+                                ).join(', ')}
+                              </div>
+                            ` : ''}
+                          </div>
+                          
+                          ${registro.fotos?.length ? `
+                            <div class="foto-container">
+                              ${registro.fotos.map(foto => 
+                                `<img src="${foto}" alt="Foto da atividade" class="foto" onerror="this.style.display='none'">`
+                              ).join('')}
+                            </div>
+                          ` : ''}
                         </div>
-                      ` : ''}
-                    </div>
-                  `;
-                }).join('') : '<p>Nenhuma atividade registrada para o período.</p>'}
+                      `;
+                    }).join('<hr style="margin: 10px 0; border: 0; border-top: 1px solid #eee;">')}
+                  </div>`
+                : '<p>Nenhuma atividade registrada para o período.</p>'}
               </div>
             </div>
 
@@ -454,6 +463,7 @@ export const gerarRelatorioSemanalV2 = async (obraId: number, dataInicio: string
               ` : '<p>Nenhuma etapa em andamento no momento.</p>'}
             </div>
 
+            ${incluirPendencias ? `
             <div class="info-block">
               <h3>Pendências da Obra</h3>
               ${pendencias.lists.length > 0 ? `
@@ -472,17 +482,21 @@ export const gerarRelatorioSemanalV2 = async (obraId: number, dataInicio: string
                 </div>
               ` : '<p>Nenhuma pendência registrada para esta obra.</p>'}
             </div>
+            ` : ''}
 
             <div class="info-block">
               <h3>Observações</h3>
               ${registros
                 .filter(registro => registro.observacoes?.trim())
-                .map(registro => `
-                  <div class="registro-observacoes">
-                    ${registro.observacoes.replace(/\n/g, '<br>')}
-                  </div>
-                `).join('<br>') || '<p>Nenhuma observação registrada para o período.</p>'
-              }
+                .map(registro => {
+                  return `
+                    <div class="registro-observacoes">
+                      ${registro.observacoes.replace(/\n/g, '<br>')}
+                    </div>
+                  `;
+                }).join('<hr style="margin: 10px 0; border: 0; border-top: 1px solid #eee;">')}
+              ${registros.filter(registro => registro.observacoes?.trim()).length === 0 ? 
+                '<p>Nenhuma observação registrada para o período.</p>' : ''}
             </div>
 
             ${presencas?.length ? `

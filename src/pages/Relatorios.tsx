@@ -74,6 +74,9 @@ const Relatorios = () => {
   // Estado para armazenar os dados completos dos diários
   const [diariosCompletos, setDiariosCompletos] = useState<any[]>([]);
 
+  // Estado para controlar se as pendências devem ser incluídas no relatório
+  const [incluirPendencias, setIncluirPendencias] = useState(true);
+
   // Função para obter os dias úteis da semana (segunda a sexta)
   const getDiasUteis = (dataInicio: Date) => {
     const dias = [];
@@ -292,8 +295,8 @@ const Relatorios = () => {
     if (!id) {
       console.error('[DEBUG] ID da obra não fornecido');
       toast({
-        title: "Erro",
-        description: "ID da obra não fornecido",
+        title: "Erro de identificação",
+        description: "Não foi possível identificar a obra para gerar o relatório.",
         variant: "destructive"
       });
       return;
@@ -326,8 +329,8 @@ const Relatorios = () => {
       if (relatorioExistente) {
         console.log('[DEBUG] Relatório já existe para esta semana:', relatorioExistente);
         toast({
-          title: "Aviso",
-          description: "Já existe um relatório para esta semana.",
+          title: "Relatório já existe",
+          description: "Já existe um relatório para esta semana. Você pode visualizá-lo na lista abaixo.",
           variant: "destructive"
         });
         setGerando(false);
@@ -355,11 +358,12 @@ const Relatorios = () => {
           obraId: Number(id),
           dataInicio,
           dataFim,
-          presencasFormatadas
+          presencasFormatadas,
+          incluirPendencias
         });
         
         // Usar a nova função V2 que inclui atividades, pendências e etapas em andamento
-        const html = await gerarRelatorioSemanalV2(Number(id), dataInicio, dataFim, presencasFormatadas);
+        const html = await gerarRelatorioSemanalV2(Number(id), dataInicio, dataFim, presencasFormatadas, incluirPendencias);
         
         console.log('[DEBUG] HTML recebido da função gerarRelatorioSemanalV2:', html ? html.substring(0, 200) + '...' : 'vazio');
         
@@ -371,45 +375,98 @@ const Relatorios = () => {
         console.log('[DEBUG] Relatório HTML gerado com sucesso');
         console.log('[DEBUG] Salvando relatório no Supabase...');
         
-        // Salvar o relatório no Supabase
-        const { data: novoRelatorio, error } = await supabase
-          .from('relatorios')
-          .insert([{
-            obra_id: Number(id),
-            data_inicio: dataInicio,
-            data_fim: dataFim,
-            tipo: 'semanal',
-            conteudo: html
-          }])
-          .select()
-          .single();
+        try {
+          // Salvar o relatório no Supabase
+          const { data: novoRelatorio, error } = await supabase
+            .from('relatorios')
+            .insert([{
+              obra_id: Number(id),
+              data_inicio: dataInicio,
+              data_fim: dataFim,
+              tipo: 'semanal',
+              conteudo: html
+            }])
+            .select()
+            .single();
 
-        if (error) {
-          console.error('[DEBUG] Erro ao salvar relatório no Supabase:', error);
-          throw error;
+          if (error) {
+            console.error('[DEBUG] Erro ao salvar relatório no Supabase:', error);
+            
+            // Tentar uma versão simplificada se houver erro de coluna
+            if (error.message?.includes('column') || error.code === 'PGRST204') {
+              console.log('[DEBUG] Tentando salvar com estrutura simplificada...');
+              
+              // Verificar se a tabela usa 'data' em vez de 'data_inicio'
+              const { data: verificaColuna } = await supabase
+                .from('relatorios')
+                .select('data')
+                .limit(1);
+                
+              const temColunaData = verificaColuna !== null;
+              
+              // Tentar inserir com a estrutura antiga (usando 'data' em vez de 'data_inicio')
+              if (temColunaData) {
+                const { data: relatorioSimplificado, error: erroSimplificado } = await supabase
+                  .from('relatorios')
+                  .insert([{
+                    obra_id: Number(id),
+                    data: dataInicio,
+                    tipo: 'semanal',
+                    conteudo: html
+                  }])
+                  .select()
+                  .single();
+                  
+                if (erroSimplificado) {
+                  console.error('[DEBUG] Erro ao salvar relatório simplificado:', erroSimplificado);
+                  throw erroSimplificado;
+                }
+                
+                console.log('[DEBUG] Relatório salvo com estrutura simplificada:', relatorioSimplificado);
+                await carregarRelatoriosAnteriores();
+                
+                toast({
+                  title: "Relatório gerado com sucesso! 📊",
+                  description: "O relatório semanal foi gerado e está disponível para visualização e download.",
+                });
+                
+                return;
+              } else {
+                throw error;
+              }
+            } else {
+              throw error;
+            }
+          }
+          
+          console.log('[DEBUG] Relatório salvo com sucesso:', novoRelatorio);
+          await carregarRelatoriosAnteriores();
+          
+          toast({
+            title: "Relatório gerado com sucesso! 📊",
+            description: "O relatório semanal foi gerado e está disponível para visualização e download.",
+          });
+        } catch (error) {
+          console.error('[DEBUG] Erro ao salvar relatório:', error);
+          toast({
+            title: "Erro na geração do relatório",
+            description: "O relatório foi gerado, mas não foi possível salvá-lo. Verifique a estrutura do banco de dados.",
+            variant: "destructive"
+          });
         }
-        
-        console.log('[DEBUG] Relatório salvo com sucesso:', novoRelatorio);
-        
-        await carregarRelatoriosAnteriores();
-        
-        toast({
-          title: "Sucesso",
-          description: "Relatório gerado com sucesso!",
-        });
       } catch (err: any) {
         console.error('[DEBUG] Erro específico ao gerar relatório:', err);
         toast({
-          title: "Erro",
-          description: `Erro ao gerar relatório: ${err.message || 'Erro desconhecido'}`,
+          title: "Erro na geração do relatório",
+          description: `Não foi possível gerar o relatório: ${err.message || 'Erro desconhecido'}. Verifique se há registros no diário para esta semana.`,
           variant: "destructive"
         });
       }
     } catch (error: any) {
       console.error('[DEBUG] Erro geral ao gerar relatório:', error);
       toast({
-        title: "Erro",
-        description: `Não foi possível gerar o relatório: ${error.message || 'Erro desconhecido'}`,
+        title: "Falha no processamento",
+        description: `Não foi possível gerar o relatório: ${error.message || 'Erro desconhecido'}. Tente novamente mais tarde.`,
         variant: "destructive"
       });
     } finally {
@@ -499,7 +556,7 @@ const Relatorios = () => {
       } catch (fallbackError) {
         console.error('[DEBUG] Erro no método alternativo:', fallbackError);
         toast({
-          title: "Erro",
+          title: "Erro de visualização",
           description: "Não foi possível visualizar o relatório. Verifique se o bloqueador de pop-ups está desativado.",
           variant: "destructive"
         });
@@ -516,14 +573,14 @@ const Relatorios = () => {
       await excluirRelatorio(relatorioId);
       await carregarRelatoriosAnteriores();
       toast({
-        title: "Sucesso",
-        description: "Relatório excluído com sucesso!",
+        title: "Relatório excluído! 🗑️",
+        description: "O relatório foi removido permanentemente do sistema.",
       });
     } catch (error) {
       console.error('Erro ao excluir relatório:', error);
       toast({
-        title: "Erro",
-        description: "Não foi possível excluir o relatório.",
+        title: "Erro ao excluir",
+        description: "Não foi possível excluir o relatório. Ele pode estar sendo usado em outros lugares do sistema.",
         variant: "destructive"
       });
     }
@@ -964,23 +1021,54 @@ const Relatorios = () => {
             </div>
           </div>
 
-          <Button 
-            className="w-full mt-6"
-            onClick={gerarRelatorio}
-            disabled={gerando}
-          >
-            {gerando ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                Gerando...
-              </>
-            ) : (
-              <>
-                <FileText className="w-4 h-4 mr-2" />
-                Gerar Relatório
-              </>
-            )}
-          </Button>
+          <div className="flex flex-col space-y-4">
+            <Card className="p-6">
+              <div className="flex flex-col space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-2xl font-bold">Relatório Semanal</h2>
+                  <div>
+                    <p className="text-sm text-gray-500">
+                      Período: {format(startOfWeek(semanaAtual, { weekStartsOn: 0 }), 'dd/MM/yyyy')} a {format(endOfWeek(semanaAtual, { weekStartsOn: 0 }), 'dd/MM/yyyy')}
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="flex items-center justify-end">
+                  <div className="flex items-center space-x-4">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox 
+                        id="incluir-pendencias" 
+                        checked={incluirPendencias} 
+                        onCheckedChange={(checked) => setIncluirPendencias(checked as boolean)}
+                      />
+                      <label 
+                        htmlFor="incluir-pendencias" 
+                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                      >
+                        Incluir pendências no relatório
+                      </label>
+                    </div>
+                    <Button 
+                      onClick={gerarRelatorio} 
+                      disabled={gerando}
+                    >
+                      {gerando ? (
+                        <>
+                          <div className="animate-spin mr-2 h-4 w-4 border-2 border-b-transparent border-white rounded-full"></div>
+                          Gerando...
+                        </>
+                      ) : (
+                        <>
+                          <FileText className="w-4 h-4 mr-2" />
+                          Gerar Relatório
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          </div>
         </div>
       </Card>
 

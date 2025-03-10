@@ -1,17 +1,35 @@
 import React, { useState, useEffect } from "react";
-import { Link, useLocation, Outlet } from "react-router-dom";
-import { Building2, Calculator, RefreshCw } from "lucide-react";
+import { Link, useLocation, Outlet, useNavigate } from "react-router-dom";
+import { Building2, Calculator, RefreshCw, LogOut, User } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const Layout = () => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, signOut, isDevelopmentMode } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isCheckingConnection, setIsCheckingConnection] = useState(false);
 
   useEffect(() => {
+    // Pular verificação de conexão no modo de desenvolvimento
+    if (isDevelopmentMode) {
+      setIsLoading(false);
+      return;
+    }
+    
     checkConnection();
-  }, []);
+  }, [isDevelopmentMode]);
 
   const checkConnection = async () => {
     try {
@@ -63,6 +81,14 @@ const Layout = () => {
     { icon: Calculator, label: "Orçamentos", path: "/orcamentos" }
   ];
 
+  const handleLogout = async () => {
+    await signOut();
+    navigate('/login');
+  };
+
+  // Obter o nome do usuário
+  const userName = user?.user_metadata?.name || user?.email || 'Usuário';
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -113,11 +139,37 @@ const Layout = () => {
       <header className="bg-white shadow-sm fixed top-0 left-0 right-0 z-10">
         <div className="container mx-auto px-4 py-3 flex justify-between items-center">
           <h1 className="text-xl font-bold text-primary">G-Log</h1>
-          <button className="md:hidden">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </button>
+          
+          <div className="flex items-center space-x-4">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+                  <User className="h-5 w-5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-56" align="end" forceMount>
+                <DropdownMenuLabel className="font-normal">
+                  <div className="flex flex-col space-y-1">
+                    <p className="text-sm font-medium leading-none">{userName}</p>
+                    <p className="text-xs leading-none text-muted-foreground">
+                      {user?.email || 'Modo de desenvolvimento'}
+                    </p>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleLogout} className="text-red-600 cursor-pointer">
+                  <LogOut className="mr-2 h-4 w-4" />
+                  <span>Sair</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            
+            <button className="md:hidden">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -131,19 +183,21 @@ const Layout = () => {
                 <Link
                   key={item.path}
                   to={item.path}
-                  className={`flex items-center px-4 py-2 text-gray-700 rounded-md hover:bg-gray-100 ${
-                    isActive ? "bg-gray-100 text-primary" : ""
+                  className={`flex items-center space-x-2 px-3 py-2 rounded-md transition-colors ${
+                    isActive
+                      ? "bg-primary text-white"
+                      : "text-gray-700 hover:bg-gray-100"
                   }`}
                 >
-                  <Icon className="w-5 h-5 mr-3" />
-                  {item.label}
+                  <Icon className="h-5 w-5" />
+                  <span>{item.label}</span>
                 </Link>
               );
             })}
           </nav>
         </aside>
 
-        <main className="flex-1 p-4 pt-4 md:ml-64">
+        <main className="flex-1 md:ml-64 p-4">
           <Outlet />
         </main>
       </div>

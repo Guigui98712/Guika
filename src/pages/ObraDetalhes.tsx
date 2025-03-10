@@ -141,8 +141,8 @@ const ObraDetalhes = () => {
       console.error('Erro ao carregar dados:', error);
       setError(error instanceof Error ? error.message : 'Erro ao carregar dados da obra');
       toast({
-        title: "Erro",
-        description: error instanceof Error ? error.message : 'Não foi possível carregar os dados da obra',
+        title: "Erro ao carregar obra",
+        description: error instanceof Error ? error.message : 'Não foi possível carregar os dados da obra. Verifique sua conexão e tente novamente.',
         variant: "destructive"
       });
     } finally {
@@ -190,8 +190,8 @@ const ObraDetalhes = () => {
       } catch (error) {
         console.error('Erro ao carregar status das etapas:', error);
         toast({
-          title: "Erro",
-          description: "Não foi possível carregar o status das etapas.",
+          title: "Erro ao carregar etapas",
+          description: "Não foi possível carregar o status das etapas. Algumas informações podem estar incompletas.",
           variant: "destructive"
         });
       }

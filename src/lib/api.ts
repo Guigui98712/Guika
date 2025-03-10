@@ -19,10 +19,23 @@ type NovoOrcamento = Database['public']['Tables']['orcamentos']['Insert'];
 // Funções para Obras
 export const listarObras = async () => {
   try {
-    const { data, error } = await supabase
+    // Obter o usuário atual
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user?.id;
+    
+    console.log('[DEBUG] Listando obras para o usuário:', userId);
+    
+    let query = supabase
       .from('obras')
       .select('*')
       .order('created_at', { ascending: false });
+    
+    // Se estiver autenticado, filtrar por user_id
+    if (userId) {
+      query = query.eq('user_id', userId);
+    }
+    
+    const { data, error } = await query;
 
     if (error) throw error;
     return data;
@@ -48,11 +61,27 @@ export const buscarObra = async (id: number) => {
   }
 };
 
-export const criarObra = async (obra: Partial<Obra>) => {
+export const criarObra = async (obra: ObraParaEnvio) => {
   try {
+    // Obter o usuário atual
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user?.id;
+    
+    if (!userId) {
+      throw new Error('Usuário não autenticado');
+    }
+    
+    console.log('[DEBUG] Criando obra para o usuário:', userId);
+    
+    // Adicionar o user_id à obra
+    const obraComUserId = {
+      ...obra,
+      user_id: userId
+    };
+    
     const { data, error } = await supabase
       .from('obras')
-      .insert([obra])
+      .insert([obraComUserId])
       .select()
       .single();
 
@@ -201,19 +230,48 @@ export const salvarRegistroDiario = async (registro: Partial<RegistroDiario>) =>
       throw new Error('Campo descricao é obrigatório');
     }
     
-    const { data, error } = await supabase
-      .from('diario_obra')
-      .insert([registro])
-      .select()
-      .single();
+    // Criar um objeto com apenas os campos básicos garantidos
+    const registroBasico = {
+      obra_id: registro.obra_id,
+      data: registro.data,
+      descricao: registro.descricao,
+      observacoes: registro.observacoes || null
+    };
+    
+    try {
+      // Primeiro, tentar inserir com todos os campos
+      const { data, error } = await supabase
+        .from('diario_obra')
+        .insert([registro])
+        .select()
+        .single();
 
-    if (error) {
+      if (error) {
+        console.error('[API] Erro do Supabase ao salvar registro diário completo:', error);
+        
+        // Se falhar, tentar inserir apenas com os campos básicos
+        console.log('[API] Tentando salvar apenas campos básicos:', registroBasico);
+        const { data: dataBasico, error: errorBasico } = await supabase
+          .from('diario_obra')
+          .insert([registroBasico])
+          .select()
+          .single();
+          
+        if (errorBasico) {
+          console.error('[API] Erro do Supabase ao salvar registro básico:', errorBasico);
+          throw errorBasico;
+        }
+        
+        console.log('[API] Registro diário básico salvo com sucesso:', dataBasico);
+        return dataBasico;
+      }
+      
+      console.log('[API] Registro diário completo salvo com sucesso:', data);
+      return data;
+    } catch (error) {
       console.error('[API] Erro do Supabase ao salvar registro diário:', error);
       throw error;
     }
-    
-    console.log('[API] Registro diário salvo com sucesso:', data);
-    return data;
   } catch (error) {
     console.error('[API] Erro ao salvar registro diário:', error);
     throw error;

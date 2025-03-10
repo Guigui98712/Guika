@@ -79,8 +79,8 @@ const Obras = () => {
       console.error('[DEBUG] Erro ao carregar obras:', error);
       setError('Não foi possível carregar as obras. Por favor, tente novamente.');
       toast({
-        title: "Erro",
-        description: "Não foi possível carregar as obras.",
+        title: "Erro ao carregar obras",
+        description: "Não foi possível carregar a lista de obras. Verifique sua conexão e tente novamente.",
         variant: "destructive"
       });
     } finally {
@@ -123,8 +123,8 @@ const Obras = () => {
   const handleNovaObra = async () => {
     if (!novaObra.nome || !novaObra.endereco || !novaObra.custo_previsto) {
       toast({
-        title: "Erro",
-        description: "Preencha todos os campos obrigatórios.",
+        title: "Campos obrigatórios",
+        description: "Por favor, preencha todos os campos obrigatórios: nome, endereço e custo previsto.",
         variant: "destructive"
       });
       return;
@@ -136,8 +136,8 @@ const Obras = () => {
       // Upload do logo se existir
       let logoUrl = null;
       if (logoFile) {
-        const resultado = await uploadFoto(logoFile, 'logos');
-        logoUrl = resultado.url;
+        const resultado = await uploadFoto(logoFile);
+        logoUrl = resultado;
       }
       
       const novaObraData: ObraParaEnvio = {
@@ -151,7 +151,9 @@ const Obras = () => {
         responsavel: novaObra.responsavel || null,
         logo_url: logoUrl,
         data_inicio: null,
-        data_previsao_fim: novaObra.data_previsao_fim || null
+        data_previsao_fim: novaObra.data_previsao_fim ? `${novaObra.data_previsao_fim}-01` : null,
+        user_id: null, // Será preenchido automaticamente pelo backend
+        trello_board_id: null
       };
 
       console.log('[DEBUG] Enviando dados para criação da obra:', novaObraData);
@@ -177,14 +179,14 @@ const Obras = () => {
       setShowDialog(false);
       
       toast({
-        title: "Sucesso",
-        description: "Obra criada com sucesso!"
+        title: "Obra criada com sucesso! 🏗️",
+        description: `A obra "${novaObra.nome}" foi criada e já está disponível no sistema.`
       });
     } catch (error) {
       console.error('Erro ao criar obra:', error);
       toast({
-        title: "Erro",
-        description: "Não foi possível criar a obra.",
+        title: "Erro ao criar obra",
+        description: "Não foi possível criar a obra. Verifique os dados e tente novamente.",
         variant: "destructive"
       });
     } finally {
@@ -215,8 +217,8 @@ const Obras = () => {
       let logoUrl = obraEmEdicao.logo_url;
       if (logoEditFile) {
         console.log('[DEBUG] Enviando novo logo');
-        const resultado = await uploadFoto(logoEditFile, 'logos');
-        logoUrl = resultado.url;
+        const resultado = await uploadFoto(logoEditFile);
+        logoUrl = resultado;
         console.log('[DEBUG] Logo enviado com sucesso:', logoUrl);
       }
       
@@ -232,7 +234,9 @@ const Obras = () => {
         responsavel: obraEmEdicao.responsavel,
         logo_url: logoUrl,
         data_inicio: obraEmEdicao.data_inicio,
-        data_previsao_fim: obraEmEdicao.data_previsao_fim
+        data_previsao_fim: obraEmEdicao.data_previsao_fim ? 
+          (obraEmEdicao.data_previsao_fim.length === 7 ? `${obraEmEdicao.data_previsao_fim}-01` : obraEmEdicao.data_previsao_fim) : 
+          null
       };
       console.log('[DEBUG] Dados de atualização:', dadosAtualizacao);
       
@@ -250,14 +254,14 @@ const Obras = () => {
       setShowEditDialog(false);
       
       toast({
-        title: "Sucesso",
-        description: "Obra atualizada com sucesso!"
+        title: "Obra atualizada! ✅",
+        description: `As informações da obra "${obraEmEdicao.nome}" foram atualizadas com sucesso.`
       });
     } catch (error) {
       console.error('[DEBUG] Erro ao atualizar obra:', error);
       toast({
-        title: "Erro",
-        description: "Não foi possível atualizar a obra.",
+        title: "Erro na atualização",
+        description: "Não foi possível atualizar as informações da obra. Tente novamente mais tarde.",
         variant: "destructive"
       });
     } finally {
@@ -271,14 +275,14 @@ const Obras = () => {
       await carregarObras();
       
       toast({
-        title: "Sucesso",
-        description: "Obra excluída com sucesso!"
+        title: "Obra excluída! 🗑️",
+        description: "A obra foi removida permanentemente do sistema."
       });
     } catch (error) {
       console.error('Erro ao excluir obra:', error);
       toast({
-        title: "Erro",
-        description: "Não foi possível excluir a obra.",
+        title: "Erro ao excluir",
+        description: "Não foi possível excluir a obra. Ela pode estar sendo usada em outros registros do sistema.",
         variant: "destructive"
       });
     }
