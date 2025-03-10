@@ -7,6 +7,7 @@ import { format, startOfWeek, endOfWeek, addWeeks, subWeeks, isWithinInterval, s
 import { ptBR } from "date-fns/locale";
 import { useToast } from "@/components/ui/use-toast";
 import { gerarRelatorioSemanal, excluirRelatorio } from "@/lib/api";
+import { gerarRelatorioSemanalV2 } from "@/lib/relatorio";
 import Calendar from "react-calendar";
 import type { RelatorioSemanal } from "@/types/obra";
 import { supabase } from "@/lib/supabase";
@@ -290,16 +291,26 @@ const Relatorios = () => {
   const gerarRelatorio = async () => {
     if (!id) {
       console.error('[DEBUG] ID da obra não fornecido');
+      toast({
+        title: "Erro",
+        description: "ID da obra não fornecido",
+        variant: "destructive"
+      });
       return;
     }
 
     try {
       setGerando(true);
+      console.log('[DEBUG] Iniciando geração de relatório...');
+      
       const dataInicio = format(startOfWeek(semanaAtual, { weekStartsOn: 0 }), 'yyyy-MM-dd');
       const dataFim = format(endOfWeek(semanaAtual, { weekStartsOn: 0 }), 'yyyy-MM-dd');
+      
+      console.log('[DEBUG] Período do relatório:', { dataInicio, dataFim });
 
       // Verificar se já existe relatório para esta semana
-      const { data: relatorioExistente } = await supabase
+      console.log('[DEBUG] Verificando se já existe relatório para esta semana...');
+      const { data: relatorioExistente, error: errorVerificacao } = await supabase
         .from('relatorios')
         .select('*')
         .eq('obra_id', id)
@@ -307,16 +318,24 @@ const Relatorios = () => {
         .eq('data_fim', dataFim)
         .single();
 
+      if (errorVerificacao && errorVerificacao.code !== 'PGRST116') {
+        console.error('[DEBUG] Erro ao verificar relatório existente:', errorVerificacao);
+        throw new Error(`Erro ao verificar relatório existente: ${errorVerificacao.message}`);
+      }
+
       if (relatorioExistente) {
+        console.log('[DEBUG] Relatório já existe para esta semana:', relatorioExistente);
         toast({
           title: "Aviso",
           description: "Já existe um relatório para esta semana.",
           variant: "destructive"
         });
+        setGerando(false);
         return;
       }
 
       // Incluir dados de presença no relatório
+      console.log('[DEBUG] Formatando dados de presença...');
       const presencasFormatadas = funcionarios.map(func => ({
         nome: func.nome,
         presencas: getDiasUteis(semanaAtual)
@@ -325,48 +344,72 @@ const Relatorios = () => {
             presente: func.presencas[format(dia, 'yyyy-MM-dd')] || 0
           }))
       }));
-
-      const html = await gerarRelatorioSemanal(Number(id), dataInicio, dataFim, presencasFormatadas);
       
-      if (!html) {
-        throw new Error('O relatório gerado está vazio');
+      console.log('[DEBUG] Presenças formatadas:', presencasFormatadas);
+      console.log('[DEBUG] Chamando API para gerar relatório...');
+
+      try {
+        console.log('[DEBUG] Tipo da função gerarRelatorioSemanal:', typeof gerarRelatorioSemanal);
+        console.log('[DEBUG] Tipo da função gerarRelatorioSemanalV2:', typeof gerarRelatorioSemanalV2);
+        console.log('[DEBUG] Parâmetros para gerarRelatorioSemanalV2:', {
+          obraId: Number(id),
+          dataInicio,
+          dataFim,
+          presencasFormatadas
+        });
+        
+        // Usar a nova função V2 que inclui atividades, pendências e etapas em andamento
+        const html = await gerarRelatorioSemanalV2(Number(id), dataInicio, dataFim, presencasFormatadas);
+        
+        console.log('[DEBUG] HTML recebido da função gerarRelatorioSemanalV2:', html ? html.substring(0, 200) + '...' : 'vazio');
+        
+        if (!html) {
+          console.error('[DEBUG] O relatório gerado está vazio');
+          throw new Error('O relatório gerado está vazio');
+        }
+        
+        console.log('[DEBUG] Relatório HTML gerado com sucesso');
+        console.log('[DEBUG] Salvando relatório no Supabase...');
+        
+        // Salvar o relatório no Supabase
+        const { data: novoRelatorio, error } = await supabase
+          .from('relatorios')
+          .insert([{
+            obra_id: Number(id),
+            data_inicio: dataInicio,
+            data_fim: dataFim,
+            tipo: 'semanal',
+            conteudo: html
+          }])
+          .select()
+          .single();
+
+        if (error) {
+          console.error('[DEBUG] Erro ao salvar relatório no Supabase:', error);
+          throw error;
+        }
+        
+        console.log('[DEBUG] Relatório salvo com sucesso:', novoRelatorio);
+        
+        await carregarRelatoriosAnteriores();
+        
+        toast({
+          title: "Sucesso",
+          description: "Relatório gerado com sucesso!",
+        });
+      } catch (err: any) {
+        console.error('[DEBUG] Erro específico ao gerar relatório:', err);
+        toast({
+          title: "Erro",
+          description: `Erro ao gerar relatório: ${err.message || 'Erro desconhecido'}`,
+          variant: "destructive"
+        });
       }
-      
-      // Salvar o relatório no Supabase
-      const { data: novoRelatorio, error } = await supabase
-        .from('relatorios')
-        .insert([{
-          obra_id: Number(id),
-          data_inicio: dataInicio,
-          data_fim: dataFim,
-          tipo: 'semanal',
-          conteudo: html
-        }])
-        .select()
-        .single();
-
-      if (error) {
-        throw error;
-      }
-
-      // Atualizar a lista de relatórios
-      await carregarRelatoriosAnteriores();
-      
-      // Abrir o relatório em uma nova aba
-      const blob = new Blob([html], { type: 'text/html' });
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-      URL.revokeObjectURL(url);
-
-      toast({
-        title: "Sucesso",
-        description: "Relatório gerado com sucesso!",
-      });
-    } catch (error) {
-      console.error('Erro ao gerar relatório:', error);
+    } catch (error: any) {
+      console.error('[DEBUG] Erro geral ao gerar relatório:', error);
       toast({
         title: "Erro",
-        description: "Não foi possível gerar o relatório.",
+        description: `Não foi possível gerar o relatório: ${error.message || 'Erro desconhecido'}`,
         variant: "destructive"
       });
     } finally {
@@ -402,17 +445,65 @@ const Relatorios = () => {
 
   const handleVisualizarRelatorio = (relatorio: any) => {
     try {
-      const blob = new Blob([relatorio.conteudo], { type: 'text/html' });
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-      URL.revokeObjectURL(url);
+      console.log('[DEBUG] Visualizando relatório:', relatorio);
+      
+      // Criar um iframe temporário para exibir o relatório
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+      
+      // Escrever o conteúdo HTML no iframe
+      const iframeDocument = iframe.contentDocument || iframe.contentWindow?.document;
+      if (iframeDocument) {
+        iframeDocument.open();
+        iframeDocument.write(relatorio.conteudo);
+        iframeDocument.close();
+        
+        // Imprimir o iframe em uma nova janela
+        iframe.onload = () => {
+          try {
+            iframe.contentWindow?.print();
+          } catch (printError) {
+            console.error('[DEBUG] Erro ao imprimir:', printError);
+            
+            // Alternativa: abrir em nova aba
+            const blob = new Blob([relatorio.conteudo], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const newWindow = window.open('', '_blank');
+            if (newWindow) {
+              newWindow.document.write(relatorio.conteudo);
+              newWindow.document.close();
+            } else {
+              throw new Error('Não foi possível abrir uma nova janela. Verifique se o bloqueador de pop-ups está desativado.');
+            }
+          }
+          
+          // Remover o iframe após a impressão
+          setTimeout(() => {
+            document.body.removeChild(iframe);
+          }, 1000);
+        };
+      }
     } catch (error) {
-      console.error('Erro ao visualizar o relatório:', error);
-      toast({
-        title: "Erro",
-        description: "Não foi possível visualizar o relatório.",
-        variant: "destructive"
-      });
+      console.error('[DEBUG] Erro ao visualizar o relatório:', error);
+      
+      // Método alternativo se o principal falhar
+      try {
+        const newWindow = window.open('', '_blank');
+        if (newWindow) {
+          newWindow.document.write(relatorio.conteudo);
+          newWindow.document.close();
+        } else {
+          throw new Error('Não foi possível abrir uma nova janela. Verifique se o bloqueador de pop-ups está desativado.');
+        }
+      } catch (fallbackError) {
+        console.error('[DEBUG] Erro no método alternativo:', fallbackError);
+        toast({
+          title: "Erro",
+          description: "Não foi possível visualizar o relatório. Verifique se o bloqueador de pop-ups está desativado.",
+          variant: "destructive"
+        });
+      }
     }
   };
 
@@ -608,42 +699,44 @@ const Relatorios = () => {
 
   const handleDownloadPDF = async (relatorio: any) => {
     try {
-      // Criar um elemento temporário para renderizar o HTML
-      const element = document.createElement('div');
-      element.innerHTML = relatorio.conteudo;
-      document.body.appendChild(element);
-
-      // Configurar as opções do PDF
-      const options = {
-        margin: [10, 10, 10, 10], // Margens menores
-        filename: `relatorio_${format(parseISO(relatorio.data_inicio), 'dd-MM-yyyy')}_a_${format(parseISO(relatorio.data_fim), 'dd-MM-yyyy')}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { 
-          scale: 1.5, // Escala reduzida
-          useCORS: true,
-          logging: false,
-          letterRendering: true
-        },
-        jsPDF: { 
-          unit: 'mm', 
-          format: 'a4', 
-          orientation: 'portrait',
-          compress: true,
-          hotfixes: ["px_scaling"]
-        },
-        pagebreak: { mode: 'avoid-all' } // Tenta evitar quebras de página desnecessárias
-      };
-
-      // Gerar o PDF usando html2pdf
-      await html2pdf().set(options).from(element).save();
+      console.log('[DEBUG] Baixando relatório como PDF:', relatorio);
       
-      // Limpar o elemento temporário
-      document.body.removeChild(element);
+      // Criar um elemento temporário para renderizar o HTML
+      const container = document.createElement('div');
+      container.innerHTML = relatorio.conteudo;
+      container.style.position = 'absolute';
+      container.style.left = '-9999px';
+      document.body.appendChild(container);
+      
+      // Configurações do PDF
+      const options = {
+        margin: 10,
+        filename: `Relatório_${relatorio.data_inicio}_${relatorio.data_fim}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      };
+      
+      // Gerar o PDF
+      toast({
+        title: "Processando",
+        description: "Gerando PDF, por favor aguarde...",
+      });
+      
+      const pdf = await html2pdf().from(container).set(options).save();
+      
+      // Remover o elemento temporário
+      document.body.removeChild(container);
+      
+      toast({
+        title: "Sucesso",
+        description: "PDF gerado com sucesso!",
+      });
     } catch (error) {
-      console.error('Erro ao baixar o PDF:', error);
+      console.error('[DEBUG] Erro ao gerar PDF:', error);
       toast({
         title: "Erro",
-        description: "Não foi possível baixar o PDF do relatório.",
+        description: "Não foi possível gerar o PDF. Tente novamente.",
         variant: "destructive"
       });
     }
@@ -896,44 +989,47 @@ const Relatorios = () => {
           <h2 className="text-xl font-semibold mb-4">Relatórios do Mês Atual</h2>
           <div className="space-y-4">
             {relatoriosDoMes.map((relatorio) => (
-              <div
-                key={relatorio.id}
-                className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
-              >
-                <div>
-                  <p className="font-medium">
-                    {format(parseISO(relatorio.data_inicio), "dd/MM/yyyy")} - {format(parseISO(relatorio.data_fim), "dd/MM/yyyy")}
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    Gerado em: {format(parseISO(relatorio.created_at), "dd/MM/yyyy HH:mm")}
-                  </p>
+              <div key={relatorio.id} className="flex flex-col p-4 border rounded-lg bg-white shadow-sm">
+                <div className="flex justify-between items-center mb-2">
+                  <h3 className="text-lg font-semibold">
+                    {format(parseISO(relatorio.data_inicio), 'dd/MM/yyyy')} a {format(parseISO(relatorio.data_fim), 'dd/MM/yyyy')}
+                  </h3>
+                  <div className="flex space-x-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleVisualizarRelatorio(relatorio)}
+                      title="Visualizar"
+                    >
+                      <FileText className="h-4 w-4" />
+                      <span className="ml-1 hidden sm:inline">Visualizar</span>
+                    </Button>
+                    
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDownloadPDF(relatorio)}
+                      title="Baixar PDF"
+                      className="bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-300"
+                    >
+                      <Download className="h-4 w-4" />
+                      <span className="ml-1 hidden sm:inline">PDF</span>
+                    </Button>
+                    
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleExcluirRelatorio(relatorio.id)}
+                      title="Excluir"
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleVisualizarRelatorio(relatorio)}
-                  >
-                    <FileText className="w-4 h-4 mr-2" />
-                    Visualizar
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDownloadPDF(relatorio)}
-                  >
-                    <Download className="w-4 h-4 mr-2" />
-                    Baixar PDF
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleExcluirRelatorio(relatorio.id)}
-                    className="text-red-500 hover:text-red-700"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
+                <p className="text-sm text-gray-500">
+                  Tipo: {relatorio.tipo === 'semanal' ? 'Relatório Semanal' : 'Relatório Final'}
+                </p>
               </div>
             ))}
           </div>
@@ -945,44 +1041,47 @@ const Relatorios = () => {
           <h2 className="text-xl font-semibold mb-4">Todos os Relatórios</h2>
           <div className="space-y-4">
             {relatoriosAntigos.map((relatorio) => (
-              <div
-                key={relatorio.id}
-                className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
-              >
-                <div>
-                  <p className="font-medium">
-                    {format(parseISO(relatorio.data_inicio), "dd/MM/yyyy")} - {format(parseISO(relatorio.data_fim), "dd/MM/yyyy")}
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    Gerado em: {format(parseISO(relatorio.created_at), "dd/MM/yyyy HH:mm")}
-                  </p>
+              <div key={relatorio.id} className="flex flex-col p-4 border rounded-lg bg-white shadow-sm">
+                <div className="flex justify-between items-center mb-2">
+                  <h3 className="text-lg font-semibold">
+                    {format(parseISO(relatorio.data_inicio), 'dd/MM/yyyy')} a {format(parseISO(relatorio.data_fim), 'dd/MM/yyyy')}
+                  </h3>
+                  <div className="flex space-x-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleVisualizarRelatorio(relatorio)}
+                      title="Visualizar"
+                    >
+                      <FileText className="h-4 w-4" />
+                      <span className="ml-1 hidden sm:inline">Visualizar</span>
+                    </Button>
+                    
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDownloadPDF(relatorio)}
+                      title="Baixar PDF"
+                      className="bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-300"
+                    >
+                      <Download className="h-4 w-4" />
+                      <span className="ml-1 hidden sm:inline">PDF</span>
+                    </Button>
+                    
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleExcluirRelatorio(relatorio.id)}
+                      title="Excluir"
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleVisualizarRelatorio(relatorio)}
-                  >
-                    <FileText className="w-4 h-4 mr-2" />
-                    Visualizar
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDownloadPDF(relatorio)}
-                  >
-                    <Download className="w-4 h-4 mr-2" />
-                    Baixar PDF
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleExcluirRelatorio(relatorio.id)}
-                    className="text-red-500 hover:text-red-700"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
+                <p className="text-sm text-gray-500">
+                  Tipo: {relatorio.tipo === 'semanal' ? 'Relatório Semanal' : 'Relatório Final'}
+                </p>
               </div>
             ))}
           </div>

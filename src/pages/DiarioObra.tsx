@@ -205,6 +205,7 @@ const DiarioObra = () => {
 
     try {
       setSalvando(true);
+      console.log('[DEBUG] Iniciando salvamento do registro');
       
       const fotosUrls = [];
       for (const foto of fotos) {
@@ -232,31 +233,42 @@ const DiarioObra = () => {
         obra_id: Number(obraId),
         data: dataFormatada,
         descricao: descricao.trim(),
-        observacoes: observacoes.trim(),
+        observacoes: observacoes.trim() || null,
         fotos: fotosUrls,
         etapas_iniciadas: etapasIniciadas,
         etapas_concluidas: etapasConcluidas
       };
 
-      console.log('[DEBUG] Registro a ser salvo:', registro);
-      await salvarRegistroDiario(registro);
-      await carregarDados();
+      console.log('[DEBUG] Registro a ser salvo:', JSON.stringify(registro, null, 2));
       
-      setDescricao('');
-      setObservacoes('');
-      setFotos([]);
-      setEtapasIniciadas([]);
-      setEtapasConcluidas([]);
+      try {
+        const resultado = await salvarRegistroDiario(registro);
+        console.log('[DEBUG] Resultado do salvamento:', resultado);
+        await carregarDados();
+        
+        setDescricao('');
+        setObservacoes('');
+        setFotos([]);
+        setEtapasIniciadas([]);
+        setEtapasConcluidas([]);
 
-      toast({
-        title: "Sucesso",
-        description: "Registro salvo com sucesso!",
-      });
-    } catch (error) {
-      console.error('[DEBUG] Erro ao salvar:', error);
+        toast({
+          title: "Sucesso",
+          description: "Registro salvo com sucesso!",
+        });
+      } catch (err: any) {
+        console.error('[DEBUG] Erro específico ao salvar no Supabase:', err);
+        toast({
+          title: "Erro no Banco de Dados",
+          description: `Não foi possível salvar o registro: ${err.message || 'Erro desconhecido'}`,
+          variant: "destructive"
+        });
+      }
+    } catch (error: any) {
+      console.error('[DEBUG] Erro geral ao salvar:', error);
       toast({
         title: "Erro",
-        description: "Não foi possível salvar o registro.",
+        description: `Não foi possível salvar o registro: ${error.message || 'Erro desconhecido'}`,
         variant: "destructive"
       });
     } finally {
